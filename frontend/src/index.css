@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+body {
+  background: #f6f9fd;
+  color: #111827;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@keyframes fadeSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-slide-down {
+  animation: fadeSlideDown 160ms ease;
+}
+
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #document-preview-print,
+  #document-preview-print * {
+    visibility: visible;
+  }
+  #document-preview-print {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+}
