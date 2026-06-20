@@ -24,12 +24,22 @@ const TH = 'text-left text-xs font-semibold uppercase tracking-wide text-[#53617
 const TD = 'px-5 py-3.5 border-b border-[#f3f4f6] text-[13px]';
 const AVATAR_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#e11d48', '#65a30d'];
 
+const PAGE_SIZE = 5;
+
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+  if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+  return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
 export function FollowUpsPage() {
   const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [followUps, setFollowUps] = useState([]);
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FOLLOW_UP);
@@ -55,6 +65,11 @@ export function FollowUpsPage() {
     if (!isWithinDateRange(f.date || f.createdAt, dateFrom, dateTo)) return false;
     return true;
   });
+
+  useEffect(() => { setPage(1); }, [tab, search, dateFrom, dateTo]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const exportColumns = [
     { label: 'Person', value: (row) => row.person },
     { label: 'Regarding', value: (row) => row.regarding },
@@ -172,7 +187,7 @@ export function FollowUpsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row, i) => (
+              {paginated.map((row, i) => (
                 <tr key={row._id ?? i} className="hover:bg-gray-50">
                   <td className={TD}>
                     <div className="flex items-center gap-2.5">
@@ -206,8 +221,17 @@ export function FollowUpsPage() {
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-[#edf2f7] flex justify-between text-[13px] text-[#536173]">
-          <span>Showing {filtered.length} of {followUps.length} follow ups</span>
+        <div className="px-5 py-3 border-t border-[#edf2f7] flex items-center justify-between text-[13px] text-[#536173]">
+          <span>Showing {paginated.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">←</button>
+            {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+              <span key={`ellipsis-${i}`} className="px-2 py-1 text-[12px] text-[#536173]">…</span>
+            ) : (
+              <button key={p} onClick={() => setPage(p)} className={`px-2 py-1 text-[12px] border rounded font-[inherit] cursor-pointer ${p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-[#dbe4ef] hover:bg-gray-50 bg-white'}`}>{p}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">→</button>
+          </div>
         </div>
       </div>
     </div>

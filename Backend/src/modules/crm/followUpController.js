@@ -4,7 +4,7 @@ import { httpError } from '../../utils/httpError.js';
 // GET /api/crm/follow-ups
 export async function listFollowUps(req, res, next) {
   try {
-    const followUps = await FollowUp.find().sort({ createdAt: -1 }).lean();
+    const followUps = await FollowUp.find({ userId: req.user.id }).sort({ createdAt: -1 }).lean();
     res.json({ followUps });
   } catch (err) {
     next(err);
@@ -14,7 +14,7 @@ export async function listFollowUps(req, res, next) {
 // POST /api/crm/follow-ups
 export async function createFollowUp(req, res, next) {
   try {
-    const followUp = await FollowUp.create(req.body);
+    const followUp = await FollowUp.create({ ...req.body, userId: req.user.id });
     res.status(201).json(followUp);
   } catch (err) {
     next(err);
@@ -24,8 +24,8 @@ export async function createFollowUp(req, res, next) {
 // PUT /api/crm/follow-ups/:id
 export async function updateFollowUp(req, res, next) {
   try {
-    const followUp = await FollowUp.findByIdAndUpdate(
-      req.params.id,
+    const followUp = await FollowUp.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -39,7 +39,7 @@ export async function updateFollowUp(req, res, next) {
 // DELETE /api/crm/follow-ups/:id
 export async function deleteFollowUp(req, res, next) {
   try {
-    const followUp = await FollowUp.findByIdAndDelete(req.params.id).lean();
+    const followUp = await FollowUp.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!followUp) return next(httpError(404, 'Follow-up not found'));
     res.json({ message: 'Follow-up deleted' });
   } catch (err) {

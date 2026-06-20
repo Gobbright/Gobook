@@ -5,9 +5,10 @@ import { httpError } from '../../utils/httpError.js';
 export async function listBranches(req, res, next) {
   try {
     const { search } = req.query;
-    const filter = search
-      ? { $or: [{ name: new RegExp(search, 'i') }, { code: new RegExp(search, 'i') }, { manager: new RegExp(search, 'i') }] }
-      : {};
+    const filter = { userId: req.user.id };
+    if (search) {
+      filter.$or = [{ name: new RegExp(search, 'i') }, { code: new RegExp(search, 'i') }, { manager: new RegExp(search, 'i') }];
+    }
     const branches = await Branch.find(filter).sort({ name: 1 }).lean();
     const total     = branches.length;
     const active    = branches.filter((b) => b.status === 'Active').length;
@@ -22,7 +23,7 @@ export async function listBranches(req, res, next) {
 // POST /api/settings/branches
 export async function createBranch(req, res, next) {
   try {
-    const branch = await Branch.create(req.body);
+    const branch = await Branch.create({ ...req.body, userId: req.user.id });
     res.status(201).json(branch);
   } catch (err) {
     if (err.code === 11000) return next(httpError(409, 'Branch code already exists'));
@@ -33,8 +34,10 @@ export async function createBranch(req, res, next) {
 // PUT /api/settings/branches/:id
 export async function updateBranch(req, res, next) {
   try {
-    const branch = await Branch.findByIdAndUpdate(
-      req.params.id, { $set: req.body }, { new: true, runValidators: true },
+    const branch = await Branch.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: req.body },
+      { new: true, runValidators: true },
     ).lean();
     if (!branch) return next(httpError(404, 'Branch not found'));
     res.json(branch);
@@ -46,7 +49,7 @@ export async function updateBranch(req, res, next) {
 // DELETE /api/settings/branches/:id
 export async function deleteBranch(req, res, next) {
   try {
-    const branch = await Branch.findByIdAndDelete(req.params.id).lean();
+    const branch = await Branch.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!branch) return next(httpError(404, 'Branch not found'));
     res.json({ message: 'Branch deleted' });
   } catch (err) {

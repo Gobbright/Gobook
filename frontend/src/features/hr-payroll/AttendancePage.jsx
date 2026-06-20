@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { DateRangeFilter } from '../../components/forms/DateRangeFilter.jsx';
 import { ExportButtons } from '../../components/forms/ExportButtons.jsx';
 import { api } from '../../services/api.js';
@@ -108,8 +108,19 @@ export function AttendancePage() {
   const [stats, setStats]     = useState({ total: 0, present: 0, absent: 0, late: 0, onLeave: 0 });
   const [loading, setLoading] = useState(true);
   const [modal, setModal]     = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const LIMIT = 10;
+  const LIMIT = 5;
+
+  const fetchAllForExport = useCallback(async () => {
+    const params = { page: 1, limit: 9999 };
+    Object.assign(params, dateRangeParams(dateFrom, dateTo));
+    if (dept !== 'All Departments') params.dept = dept;
+    const res = await api.hrListAttendance(params);
+    return res.data ?? [];
+  }, [dateFrom, dateTo, dept]);
 
   const fetchStats = useCallback(async () => {
     try { setStats(await api.hrAttendanceStats(dateRangeParams(dateFrom, dateTo))); } catch (_) {}
@@ -139,6 +150,25 @@ export function AttendancePage() {
 
   const handleSaved = () => { setModal(null); fetchRecords(); fetchStats(); };
 
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    try {
+      const result = await api.hrImportAttendance(formData);
+      setDateFrom(''); setDateTo('');
+      fetchRecords(); fetchStats();
+      setImportResult(result);
+    } catch (err) {
+      setImportResult({ error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
   const exportColumns = [
     { label: 'Employee ID', value: (row) => row.employeeId },
@@ -164,11 +194,26 @@ export function AttendancePage() {
           <h1 className="m-0 text-[22px] font-bold">Attendance</h1>
           <p className="m-0 text-[13px] text-[#536173] mt-0.5">Track and manage employee attendance</p>
         </div>
-        <button onClick={() => setModal('add')} className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button">
-          <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          Add Attendance
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
+          <button type="button" disabled={importing} onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[#374151] bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit] disabled:opacity-60">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            {importing ? 'Importing...' : 'Import Excel'}
+          </button>
+          <button onClick={() => setModal('add')} className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            Add Attendance
+          </button>
+        </div>
       </div>
+
+      {importResult && (
+        <div className={`mt-4 mb-0 px-4 py-3 rounded-lg text-[13px] border ${importResult.error ? 'bg-red-50 border-red-100 text-red-700' : 'bg-green-50 border-green-100 text-green-700'}`}>
+          {importResult.error ? importResult.error : `Import complete: ${importResult.imported ?? 0} added, ${importResult.updated ?? 0} updated${(importResult.skipped ?? 0) > 0 ? `, ${importResult.skipped} skipped` : ''}.`}
+          {importResult.errors?.length > 0 && <ul className="mt-1 list-disc pl-5 text-[12px]">{importResult.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}{importResult.errors.length > 5 && <li>...and {importResult.errors.length - 5} more</li>}</ul>}
+          <button type="button" onClick={() => setImportResult(null)} className="mt-1 text-[12px] underline bg-transparent border-0 cursor-pointer p-0 text-inherit font-[inherit]">Dismiss</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 my-5">
         {[
@@ -198,7 +243,7 @@ export function AttendancePage() {
             onToChange={setDateTo}
             onClear={() => { setDateFrom(''); setDateTo(''); }}
           />
-          <ExportButtons title="Attendance" filename="attendance" rows={records} columns={exportColumns} />
+          <ExportButtons title="Attendance" filename="attendance" rows={records} columns={exportColumns} fetchRows={fetchAllForExport} />
           <select className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit] text-[#536173] bg-white cursor-pointer" value={dept} onChange={(e) => setDept(e.target.value)}>
             {['All Departments'].map((d) => <option key={d}>{d}</option>)}
           </select>

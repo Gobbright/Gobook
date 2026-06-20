@@ -22,17 +22,89 @@ body {
   display: none;
 }
 
+.app-form-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 60;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: 0 !important;
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border-radius: 8px !important;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
+}
+
+body:has(.app-form-modal) {
+  overflow: hidden;
+}
+
+body:has(.app-form-modal)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+@media (max-width: 640px) {
+  .app-form-modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+}
+
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 4mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
   body * {
     visibility: hidden;
   }
   #document-preview-print,
   #document-preview-print * {
     visibility: visible;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   #document-preview-print {
-    position: absolute;
-    inset: 0;
-    width: 100%;
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 260mm !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    font-size: 10px;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  #document-preview-print > div:nth-last-child(2) {
+    margin-top: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #document-preview-print table {
+    page-break-inside: auto;
+  }
+
+  #document-preview-print tr,
+  #document-preview-print td,
+  #document-preview-print th {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

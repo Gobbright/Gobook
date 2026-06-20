@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const leadSchema = new Schema({
+  userId:  { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:    { type: String, required: true, trim: true },
   company: { type: String, trim: true, default: '' },
   email:   { type: String, trim: true, lowercase: true, default: '' },

@@ -3,13 +3,15 @@ import { Router } from 'express';
 import { createCampaign as createEmailCampaign, deleteCampaign as deleteEmailCampaign, listCampaigns as listEmailCampaigns, updateCampaign as updateEmailCampaign } from './emailController.js';
 import { getAiInsights, getReportsSummary } from './insightsController.js';
 import { createSalesRecord, deleteSalesRecord, getNextNumber, listSalesRecords, updateSalesRecord } from './salesRecordController.js';
-import { createVendor, deleteVendor, listVendors, updateVendor } from './vendorController.js';
+import { createVendor, deleteVendor, importVendors, listVendors, updateVendor } from './vendorController.js';
 import { createCampaign as createWACampaign, deleteCampaign as deleteWACampaign, listCampaigns as listWACampaigns, updateCampaign as updateWACampaign } from './whatsappController.js';
+import { uploadExcelFile } from '../../utils/excelImport.js';
 
 export const moreModulesRouter = Router();
 
 // Vendors
 moreModulesRouter.get('/vendors',      listVendors);
+moreModulesRouter.post('/vendors/import', uploadExcelFile.single('file'), importVendors);
 moreModulesRouter.post('/vendors',     createVendor);
 moreModulesRouter.put('/vendors/:id',  updateVendor);
 moreModulesRouter.delete('/vendors/:id', deleteVendor);

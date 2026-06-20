@@ -5,15 +5,14 @@ import { httpError } from '../../../utils/httpError.js';
 export async function listProducts(req, res, next) {
   try {
     const { search } = req.query;
-    const filter = search
-      ? {
-          $or: [
-            { description: new RegExp(search, 'i') },
-            { code: new RegExp(search, 'i') },
-            { hsn: new RegExp(search, 'i') },
-          ],
-        }
-      : {};
+    const filter = { userId: req.user.id };
+    if (search) {
+      filter.$or = [
+        { description: new RegExp(search, 'i') },
+        { code: new RegExp(search, 'i') },
+        { hsn: new RegExp(search, 'i') },
+      ];
+    }
     const products = await Product.find(filter).sort({ code: 1 }).limit(200).lean();
     res.json(products);
   } catch (err) {
@@ -24,7 +23,7 @@ export async function listProducts(req, res, next) {
 // GET /api/sales/products/:id
 export async function getProduct(req, res, next) {
   try {
-    const product = await Product.findById(req.params.id).lean();
+    const product = await Product.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!product) return next(httpError(404, 'Product not found'));
     res.json(product);
   } catch (err) {
@@ -35,7 +34,7 @@ export async function getProduct(req, res, next) {
 // POST /api/sales/products
 export async function createProduct(req, res, next) {
   try {
-    const product = await Product.create(req.body);
+    const product = await Product.create({ ...req.body, userId: req.user.id });
     res.status(201).json(product);
   } catch (err) {
     if (err.code === 11000) return next(httpError(409, `Product code "${req.body.code}" already exists`));
@@ -46,8 +45,8 @@ export async function createProduct(req, res, next) {
 // PUT /api/sales/products/:id
 export async function updateProduct(req, res, next) {
   try {
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
+    const product = await Product.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -61,7 +60,7 @@ export async function updateProduct(req, res, next) {
 // DELETE /api/sales/products/:id
 export async function deleteProduct(req, res, next) {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id).lean();
+    const product = await Product.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!product) return next(httpError(404, 'Product not found'));
     res.json({ message: 'Product deleted' });
   } catch (err) {

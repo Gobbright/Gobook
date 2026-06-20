@@ -1,7 +1,8 @@
 import { Schema, model } from 'mongoose';
 
 const stockOutSchema = new Schema({
-  stockOutNo:  { type: String, required: true, unique: true, trim: true },
+  userId:      { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
+  stockOutNo:  { type: String, required: true, trim: true },
   date:        { type: Date, required: true },
   productName: { type: String, default: '', trim: true },
   to:          { type: String, required: true, trim: true },
@@ -11,7 +12,7 @@ const stockOutSchema = new Schema({
   status:     { type: String, enum: ['Pending', 'Completed'], default: 'Pending' },
 }, { timestamps: true });
 
-stockOutSchema.index({ stockOutNo: 1 });
-stockOutSchema.index({ date: -1 });
+stockOutSchema.index({ userId: 1, stockOutNo: 1 }, { unique: true });
+stockOutSchema.index({ userId: 1, date: -1 });
 
 export const StockOut = model('StockOut', stockOutSchema);

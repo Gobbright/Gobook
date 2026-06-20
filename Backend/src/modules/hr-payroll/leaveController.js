@@ -1,8 +1,8 @@
 import { Leave } from '../../models/Leave.js';
 import { httpError } from '../../utils/httpError.js';
 
-async function nextLeaveId() {
-  const last = await Leave.findOne({}, { leaveId: 1 }, { sort: { createdAt: -1 } });
+async function nextLeaveId(userId) {
+  const last = await Leave.findOne({ userId }, { leaveId: 1 }, { sort: { createdAt: -1 } });
   let seq = 1;
   if (last) {
     const parts = last.leaveId.split('-');
@@ -16,6 +16,7 @@ async function nextLeaveId() {
 export async function getLeaveStats(req, res, next) {
   try {
     const result = await Leave.aggregate([
+      { $match: { userId: req.user.id } },
       {
         $group: {
           _id: '$status',
@@ -40,7 +41,7 @@ export async function getLeaveStats(req, res, next) {
 export async function listLeaves(req, res, next) {
   try {
     const { status, page = 1, limit = 50 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (status && status !== 'All Status') filter.status = status;
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -57,7 +58,7 @@ export async function listLeaves(req, res, next) {
 // GET /api/hr-payroll/leaves/:id
 export async function getLeave(req, res, next) {
   try {
-    const leave = await Leave.findById(req.params.id).lean();
+    const leave = await Leave.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!leave) return next(httpError(404, 'Leave request not found'));
     res.json(leave);
   } catch (err) {
@@ -68,8 +69,9 @@ export async function getLeave(req, res, next) {
 // POST /api/hr-payroll/leaves
 export async function createLeave(req, res, next) {
   try {
-    const leaveId = await nextLeaveId();
-    const leave = await Leave.create({ ...req.body, leaveId });
+    const userId = req.user.id;
+    const leaveId = await nextLeaveId(userId);
+    const leave = await Leave.create({ ...req.body, userId, leaveId });
     res.status(201).json(leave);
   } catch (err) {
     if (err.code === 11000) return next(httpError(409, 'Leave ID already exists'));
@@ -81,8 +83,8 @@ export async function createLeave(req, res, next) {
 export async function updateLeave(req, res, next) {
   try {
     const { leaveId, ...rest } = req.body;
-    const leave = await Leave.findByIdAndUpdate(
-      req.params.id,
+    const leave = await Leave.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: rest },
       { new: true, runValidators: true },
     ).lean();
@@ -97,8 +99,8 @@ export async function updateLeave(req, res, next) {
 export async function patchLeaveStatus(req, res, next) {
   try {
     const { status } = req.body;
-    const leave = await Leave.findByIdAndUpdate(
-      req.params.id,
+    const leave = await Leave.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: { status } },
       { new: true },
     ).lean();
@@ -112,7 +114,7 @@ export async function patchLeaveStatus(req, res, next) {
 // DELETE /api/hr-payroll/leaves/:id
 export async function deleteLeave(req, res, next) {
   try {
-    const leave = await Leave.findByIdAndDelete(req.params.id).lean();
+    const leave = await Leave.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!leave) return next(httpError(404, 'Leave request not found'));
     res.json({ message: 'Leave request deleted' });
   } catch (err) {

@@ -6,6 +6,7 @@ import {
   createInvoice,
   updateInvoice,
   deleteInvoice,
+  sendInvoiceEmail,
 } from './billing-invoicing/invoiceController.js';
 import {
   getNextCreditNoteNumber,
@@ -73,6 +74,7 @@ salesRouter.post('/invoices',             createInvoice);
 salesRouter.get('/invoices/:id',          getInvoice);
 salesRouter.put('/invoices/:id',          updateInvoice);
 salesRouter.delete('/invoices/:id',       deleteInvoice);
+salesRouter.post('/invoices/:id/send-email', sendInvoiceEmail);
 
 // ── Credit Note CRUD ─────────────────────────────────────────────────────────
 salesRouter.get('/credit-notes/next-number',  getNextCreditNoteNumber);

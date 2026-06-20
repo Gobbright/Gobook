@@ -56,7 +56,8 @@ export const api = {
   getInvoice:    (id)        => request('GET',    `/sales/invoices/${id}`),
   createInvoice: (payload)   => request('POST',   '/sales/invoices', payload),
   updateInvoice: (id, payload) => request('PUT',  `/sales/invoices/${id}`, payload),
-  deleteInvoice: (id)        => request('DELETE', `/sales/invoices/${id}`),
+  deleteInvoice:     (id)          => request('DELETE', `/sales/invoices/${id}`),
+  sendInvoiceEmail:  (id, payload) => request('POST',   `/sales/invoices/${id}/send-email`, payload),
 
   // ── Credit Notes ──────────────────────────────────────────────────────────
   getCreditNoteNextNumber: ()           => request('GET',    '/sales/credit-notes/next-number'),
@@ -105,6 +106,7 @@ export const api = {
   createCustomer: (payload)  => request('POST',   '/sales/customers', payload),
   updateCustomer: (id, payload) => request('PUT', `/sales/customers/${id}`, payload),
   deleteCustomer: (id)       => request('DELETE', `/sales/customers/${id}`),
+  importCustomers: (formData) => upload('/crm/customers/import', formData),
 
   // ── Products ──────────────────────────────────────────────────────────────
   listProducts:  (search)    => request('GET',    `/sales/products${search ? `?search=${encodeURIComponent(search)}` : ''}`),
@@ -129,6 +131,7 @@ export const api = {
   invCreateStockIn:     (payload)     => request('POST',   '/inventory/stock-in', payload),
   invUpdateStockIn:     (id, payload) => request('PUT',    `/inventory/stock-in/${id}`, payload),
   invDeleteStockIn:     (id)          => request('DELETE', `/inventory/stock-in/${id}`),
+  invImportStockIn:     (formData)    => upload('/inventory/stock-in/import', formData),
 
   // ── Inventory: Stock Out ──────────────────────────────────────────────────
   invStockOutNextNumber: ()            => request('GET', '/inventory/stock-out/next-number'),
@@ -157,6 +160,7 @@ export const api = {
   hrCreateEmployee:  (payload)           => request('POST',   '/hr-payroll/employees', payload),
   hrUpdateEmployee:  (id, payload)       => request('PUT',    `/hr-payroll/employees/${id}`, payload),
   hrDeleteEmployee:  (id)                => request('DELETE', `/hr-payroll/employees/${id}`),
+  hrImportEmployees: (formData)          => upload('/hr-payroll/employees/import', formData),
 
   // ── HR & Payroll: Payroll ─────────────────────────────────────────────────
   hrPayrollStats:        (params)        => request('GET', `/hr-payroll/payroll/stats${qs(params ?? {})}`),
@@ -166,6 +170,7 @@ export const api = {
   hrUpdatePayroll:       (id, payload)   => request('PUT',    `/hr-payroll/payroll/${id}`, payload),
   hrPatchPayrollStatus:  (id, status)    => request('PATCH',  `/hr-payroll/payroll/${id}/status`, { status }),
   hrDeletePayroll:       (id)            => request('DELETE', `/hr-payroll/payroll/${id}`),
+  hrImportPayroll:       (formData)      => upload('/hr-payroll/payroll/import', formData),
 
   // ── HR & Payroll: Attendance ──────────────────────────────────────────────
   hrAttendanceStats:     (params)        => request('GET', `/hr-payroll/attendance/stats${qs(params ?? {})}`),
@@ -173,6 +178,7 @@ export const api = {
   hrCreateAttendance:    (payload)       => request('POST',   '/hr-payroll/attendance', payload),
   hrUpdateAttendance:    (id, payload)   => request('PUT',    `/hr-payroll/attendance/${id}`, payload),
   hrDeleteAttendance:    (id)            => request('DELETE', `/hr-payroll/attendance/${id}`),
+  hrImportAttendance:    (formData)      => upload('/hr-payroll/attendance/import', formData),
 
   // ── HR & Payroll: Leaves ──────────────────────────────────────────────────
   hrLeaveStats:          ()              => request('GET', '/hr-payroll/leaves/stats'),

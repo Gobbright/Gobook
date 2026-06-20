@@ -4,8 +4,9 @@ import { httpError } from '../../utils/httpError.js';
 // GET /api/inventory/warehouses/stats
 export async function getWarehouseStats(req, res, next) {
   try {
+    const userId = req.user.id;
     const result = await Warehouse.aggregate([
-      { $match: { status: 'Active' } },
+      { $match: { userId, status: 'Active' } },
       {
         $group: {
           _id:            null,
@@ -31,7 +32,7 @@ export async function getWarehouseStats(req, res, next) {
 export async function listWarehouses(req, res, next) {
   try {
     const { search, page = 1, limit = 50 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (search) {
       filter.$or = [
         { name:     new RegExp(search, 'i') },
@@ -52,7 +53,7 @@ export async function listWarehouses(req, res, next) {
 // GET /api/inventory/warehouses/:id
 export async function getWarehouse(req, res, next) {
   try {
-    const wh = await Warehouse.findById(req.params.id).lean();
+    const wh = await Warehouse.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!wh) return next(httpError(404, 'Warehouse not found'));
     res.json(wh);
   } catch (err) {
@@ -63,7 +64,7 @@ export async function getWarehouse(req, res, next) {
 // POST /api/inventory/warehouses
 export async function createWarehouse(req, res, next) {
   try {
-    const wh = await Warehouse.create(req.body);
+    const wh = await Warehouse.create({ ...req.body, userId: req.user.id });
     res.status(201).json(wh);
   } catch (err) {
     next(err);
@@ -73,8 +74,8 @@ export async function createWarehouse(req, res, next) {
 // PUT /api/inventory/warehouses/:id
 export async function updateWarehouse(req, res, next) {
   try {
-    const wh = await Warehouse.findByIdAndUpdate(
-      req.params.id,
+    const wh = await Warehouse.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -88,7 +89,7 @@ export async function updateWarehouse(req, res, next) {
 // DELETE /api/inventory/warehouses/:id
 export async function deleteWarehouse(req, res, next) {
   try {
-    const wh = await Warehouse.findByIdAndDelete(req.params.id).lean();
+    const wh = await Warehouse.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!wh) return next(httpError(404, 'Warehouse not found'));
     res.json({ message: 'Warehouse deleted' });
   } catch (err) {

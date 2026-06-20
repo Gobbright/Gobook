@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const branchSchema = new Schema({
+  userId:  { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:    { type: String, required: true, trim: true },
   code:    { type: String, required: true, trim: true, uppercase: true },
   manager: { type: String, trim: true, default: '' },
@@ -12,6 +13,6 @@ const branchSchema = new Schema({
   revenue: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 
-branchSchema.index({ code: 1 }, { unique: true });
+branchSchema.index({ userId: 1, code: 1 }, { unique: true });
 
 export const Branch = model('Branch', branchSchema);

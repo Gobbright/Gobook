@@ -59,8 +59,8 @@ function normalizeHeader(value) {
   const text = typeof value === 'object' ? (value.richText?.map((r) => r.text).join('') ?? value.text ?? '') : String(value);
   const key = text
     .toLowerCase()
-    .replace(/\([^)]*\)/g, ' ') // strip parenthetical units, e.g. "Sale Price (₹)" -> "Sale Price"
-    .replace(/[^a-z0-9\s]/g, ' ') // strip remaining symbols, e.g. "Min. Stock Level" -> "Min  Stock Level"
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return FIELD_ALIASES[key] ?? null;
@@ -76,8 +76,8 @@ function cellValue(value) {
   return value;
 }
 
-async function nextStockInNo() {
-  const last = await StockIn.findOne({}, { stockInNo: 1 }, { sort: { createdAt: -1 } });
+async function nextStockInNo(userId) {
+  const last = await StockIn.findOne({ userId }, { stockInNo: 1 }, { sort: { createdAt: -1 } });
   let seq = 1;
   if (last) {
     const parts = last.stockInNo.split('-');
@@ -90,12 +90,13 @@ async function nextStockInNo() {
 // GET /api/inventory/products/stats
 export async function getProductStats(req, res, next) {
   try {
+    const userId = req.user.id;
     const [total, lowStock, outOfStock, valueResult] = await Promise.all([
-      Product.countDocuments({ status: 'Active' }),
-      Product.countDocuments({ status: 'Active', stock: { $gt: 0 }, $expr: { $lte: ['$stock', '$minStockLevel'] } }),
-      Product.countDocuments({ status: 'Active', stock: 0 }),
+      Product.countDocuments({ userId, status: 'Active' }),
+      Product.countDocuments({ userId, status: 'Active', stock: { $gt: 0 }, $expr: { $lte: ['$stock', '$minStockLevel'] } }),
+      Product.countDocuments({ userId, status: 'Active', stock: 0 }),
       Product.aggregate([
-        { $match: { status: 'Active' } },
+        { $match: { userId, status: 'Active' } },
         { $group: { _id: null, totalValue: { $sum: { $multiply: ['$rate', '$stock'] } } } },
       ]),
     ]);
@@ -113,7 +114,7 @@ export async function getProductStats(req, res, next) {
 // GET /api/inventory/products/next-code
 export async function getNextProductCode(req, res, next) {
   try {
-    const products = await Product.find({}, { code: 1 }).lean();
+    const products = await Product.find({ userId: req.user.id }, { code: 1 }).lean();
     let max = 1000;
     products.forEach(({ code }) => {
       const n = parseInt(code, 10);
@@ -129,7 +130,7 @@ export async function getNextProductCode(req, res, next) {
 export async function listProducts(req, res, next) {
   try {
     const { search, category, page = 1, limit = 50 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (search) {
       filter.$or = [
         { description: new RegExp(search, 'i') },
@@ -152,7 +153,7 @@ export async function listProducts(req, res, next) {
 // GET /api/inventory/products/categories
 export async function getCategories(req, res, next) {
   try {
-    const categories = await Product.distinct('category');
+    const categories = await Product.distinct('category', { userId: req.user.id });
     res.json(categories.filter(Boolean).sort());
   } catch (err) {
     next(err);
@@ -162,7 +163,7 @@ export async function getCategories(req, res, next) {
 // GET /api/inventory/products/:id
 export async function getProduct(req, res, next) {
   try {
-    const product = await Product.findById(req.params.id).lean();
+    const product = await Product.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!product) return next(httpError(404, 'Product not found'));
     res.json(product);
   } catch (err) {
@@ -174,6 +175,7 @@ export async function getProduct(req, res, next) {
 export async function importProducts(req, res, next) {
   try {
     if (!req.file) return next(httpError(400, 'No file uploaded'));
+    const userId = req.user.id;
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(req.file.buffer);
@@ -213,7 +215,7 @@ export async function importProducts(req, res, next) {
         continue;
       }
 
-      const data = { code, description, rate };
+      const data = { userId, code, description, rate };
       if (record.category) data.category = String(record.category).trim();
       if (record.unit) data.unit = String(record.unit).trim();
       if (record.hsn) data.hsn = String(record.hsn).trim();
@@ -237,7 +239,7 @@ export async function importProducts(req, res, next) {
       }
 
       try {
-        const existing = await Product.findOne({ code });
+        const existing = await Product.findOne({ userId, code });
         let savedProduct;
         let stockQty;
         let supplier;
@@ -256,8 +258,9 @@ export async function importProducts(req, res, next) {
 
         if (stockQty > 0) {
           try {
-            const stockInNo = await nextStockInNo();
+            const stockInNo = await nextStockInNo(userId);
             await StockIn.create({
+              userId,
               stockInNo,
               date: new Date(),
               productName: savedProduct.description,
@@ -286,12 +289,14 @@ export async function importProducts(req, res, next) {
 // POST /api/inventory/products
 export async function createProduct(req, res, next) {
   try {
-    const product = await Product.create(req.body);
+    const userId = req.user.id;
+    const product = await Product.create({ ...req.body, userId });
 
     if (product.stock > 0) {
-      nextStockInNo()
+      nextStockInNo(userId)
         .then((stockInNo) =>
           StockIn.create({
+            userId,
             stockInNo,
             date: new Date(),
             productName: product.description,
@@ -315,10 +320,11 @@ export async function createProduct(req, res, next) {
 // PUT /api/inventory/products/:id
 export async function updateProduct(req, res, next) {
   try {
-    const old = await Product.findById(req.params.id).lean();
+    const userId = req.user.id;
+    const old = await Product.findOne({ _id: req.params.id, userId }).lean();
 
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
+    const product = await Product.findOneAndUpdate(
+      { _id: req.params.id, userId },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -326,9 +332,10 @@ export async function updateProduct(req, res, next) {
 
     const stockDiff = (product.stock ?? 0) - (old?.stock ?? 0);
     if (stockDiff > 0) {
-      nextStockInNo()
+      nextStockInNo(userId)
         .then((stockInNo) =>
           StockIn.create({
+            userId,
             stockInNo,
             date: new Date(),
             productName: product.description,
@@ -352,7 +359,7 @@ export async function updateProduct(req, res, next) {
 // DELETE /api/inventory/products/:id
 export async function deleteProduct(req, res, next) {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id).lean();
+    const product = await Product.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!product) return next(httpError(404, 'Product not found'));
     res.json({ message: 'Product deleted' });
   } catch (err) {

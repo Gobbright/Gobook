@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const payrollSchema = new Schema({
+  userId:      { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   employeeId:  { type: String, required: true, trim: true },
   name:        { type: String, required: true, trim: true },
   dept:        { type: String, default: '', trim: true },
@@ -12,7 +13,7 @@ const payrollSchema = new Schema({
   status:      { type: String, enum: ['Paid', 'Pending'], default: 'Pending' },
 }, { timestamps: true });
 
-payrollSchema.index({ month: 1, dept: 1 });
-payrollSchema.index({ employeeId: 1, month: 1 }, { unique: true });
+payrollSchema.index({ userId: 1, month: 1, dept: 1 });
+payrollSchema.index({ userId: 1, employeeId: 1, month: 1 }, { unique: true });
 
 export const Payroll = model('Payroll', payrollSchema);

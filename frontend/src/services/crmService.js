@@ -1,5 +1,12 @@
 import { apiClient } from './apiClient.js';
 
+function upload(path, formData) {
+  return apiClient(path, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 export function getCustomers(search) {
   const q = search ? `?search=${encodeURIComponent(search)}` : '';
   return apiClient(`/crm/customers${q}`);
@@ -17,6 +24,10 @@ export function deleteCustomer(id) {
   return apiClient(`/crm/customers/${id}`, { method: 'DELETE' });
 }
 
+export function importCustomers(formData) {
+  return upload('/crm/customers/import', formData);
+}
+
 export function getLeads(search) {
   const q = search ? `?search=${encodeURIComponent(search)}` : '';
   return apiClient(`/crm/leads${q}`);
@@ -32,6 +43,10 @@ export function updateLead(id, lead) {
 
 export function deleteLead(id) {
   return apiClient(`/crm/leads/${id}`, { method: 'DELETE' });
+}
+
+export function importLeads(formData) {
+  return upload('/crm/leads/import', formData);
 }
 
 export function getFollowUps() {

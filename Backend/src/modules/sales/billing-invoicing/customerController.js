@@ -5,9 +5,10 @@ import { httpError } from '../../../utils/httpError.js';
 export async function listCustomers(req, res, next) {
   try {
     const { search } = req.query;
-    const filter = search
-      ? { $or: [{ name: new RegExp(search, 'i') }, { gstin: new RegExp(search, 'i') }] }
-      : {};
+    const filter = { userId: req.user.id };
+    if (search) {
+      filter.$or = [{ name: new RegExp(search, 'i') }, { gstin: new RegExp(search, 'i') }, { phone: new RegExp(search, 'i') }];
+    }
     const customers = await Customer.find(filter).sort({ name: 1 }).limit(100).lean();
     res.json(customers);
   } catch (err) {
@@ -18,7 +19,7 @@ export async function listCustomers(req, res, next) {
 // GET /api/sales/customers/:id
 export async function getCustomer(req, res, next) {
   try {
-    const customer = await Customer.findById(req.params.id).lean();
+    const customer = await Customer.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!customer) return next(httpError(404, 'Customer not found'));
     res.json(customer);
   } catch (err) {
@@ -29,7 +30,7 @@ export async function getCustomer(req, res, next) {
 // POST /api/sales/customers
 export async function createCustomer(req, res, next) {
   try {
-    const customer = await Customer.create(req.body);
+    const customer = await Customer.create({ ...req.body, userId: req.user.id });
     res.status(201).json(customer);
   } catch (err) {
     next(err);
@@ -39,8 +40,8 @@ export async function createCustomer(req, res, next) {
 // PUT /api/sales/customers/:id
 export async function updateCustomer(req, res, next) {
   try {
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -54,7 +55,7 @@ export async function updateCustomer(req, res, next) {
 // DELETE /api/sales/customers/:id
 export async function deleteCustomer(req, res, next) {
   try {
-    const customer = await Customer.findByIdAndDelete(req.params.id).lean();
+    const customer = await Customer.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!customer) return next(httpError(404, 'Customer not found'));
     res.json({ message: 'Customer deleted' });
   } catch (err) {

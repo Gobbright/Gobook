@@ -1,7 +1,8 @@
 import { Schema, model } from 'mongoose';
 
 const employeeSchema = new Schema({
-  employeeId:  { type: String, required: true, unique: true, trim: true },
+  userId:      { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
+  employeeId:  { type: String, required: true, trim: true },
   name:        { type: String, required: true, trim: true },
   dept:        { type: String, default: '', trim: true },
   designation: { type: String, default: '', trim: true },
@@ -13,7 +14,8 @@ const employeeSchema = new Schema({
   basicSalary: { type: Number, default: 0 },
 }, { timestamps: true });
 
-employeeSchema.index({ status: 1, dept: 1 });
-employeeSchema.index({ name: 1 });
+employeeSchema.index({ userId: 1, employeeId: 1 }, { unique: true });
+employeeSchema.index({ userId: 1, status: 1, dept: 1 });
+employeeSchema.index({ userId: 1, name: 1 });
 
 export const Employee = model('Employee', employeeSchema);

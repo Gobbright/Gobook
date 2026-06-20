@@ -1,5 +1,12 @@
 import { apiClient } from './apiClient.js';
 
+function upload(path, formData) {
+  return apiClient(path, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 export function getLedgerAccounts() {
   return apiClient('/accounting/ledger');
 }
@@ -22,6 +29,10 @@ export function deleteLedgerAccount(id) {
   return apiClient(`/accounting/ledger/${id}`, { method: 'DELETE' });
 }
 
+export function importLedgerAccounts(formData) {
+  return upload('/accounting/ledger/import', formData);
+}
+
 export function getJournalEntries() {
   return apiClient('/accounting/journal-entries');
 }
@@ -42,6 +53,10 @@ export function updateJournalEntry(id, entry) {
 
 export function deleteJournalEntry(id) {
   return apiClient(`/accounting/journal-entries/${id}`, { method: 'DELETE' });
+}
+
+export function importJournalEntries(formData) {
+  return upload('/accounting/journal-entries/import', formData);
 }
 
 export function getTrialBalance() {

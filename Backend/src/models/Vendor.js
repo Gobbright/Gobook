@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const vendorSchema = new Schema({
+  userId:   { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:     { type: String, required: true, trim: true },
   contact:  { type: String, trim: true, default: '' },
   phone:    { type: String, trim: true, default: '' },

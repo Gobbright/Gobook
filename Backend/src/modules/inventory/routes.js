@@ -20,7 +20,9 @@ import {
   createStockIn,
   updateStockIn,
   deleteStockIn,
+  importStockIn,
 } from './stockInController.js';
+import { uploadExcelFile } from '../../utils/excelImport.js';
 import {
   getNextStockOutNumber,
   getStockOutStats,
@@ -56,6 +58,7 @@ inventoryRouter.delete('/products/:id',     deleteProduct);
 // ── Stock In ──────────────────────────────────────────────────────────────────
 inventoryRouter.get('/stock-in/next-number', getNextStockInNumber);
 inventoryRouter.get('/stock-in/stats',       getStockInStats);
+inventoryRouter.post('/stock-in/import',     uploadExcelFile.single('file'), importStockIn);
 inventoryRouter.get('/stock-in',             listStockIn);
 inventoryRouter.post('/stock-in',            createStockIn);
 inventoryRouter.get('/stock-in/:id',         getStockIn);

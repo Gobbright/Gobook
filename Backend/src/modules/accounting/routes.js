@@ -13,6 +13,8 @@ import {
   getBalanceSheet,
   getPnlStatement,
   getTrialBalance,
+  importJournalEntries,
+  importLedgerAccounts,
   listBankBookEntries,
   listCashBookEntries,
   listJournalEntries,
@@ -22,17 +24,20 @@ import {
   updateJournalEntry,
   updateLedgerAccount,
 } from './accountingController.js';
+import { uploadExcelFile } from '../../utils/excelImport.js';
 
 export const accountingRouter = Router();
 
 accountingRouter.get('/', getAccountingSummary);
 
 accountingRouter.get('/ledger', listLedgerAccounts);
+accountingRouter.post('/ledger/import', uploadExcelFile.single('file'), importLedgerAccounts);
 accountingRouter.post('/ledger', createLedgerAccount);
 accountingRouter.put('/ledger/:id', updateLedgerAccount);
 accountingRouter.delete('/ledger/:id', deleteLedgerAccount);
 
 accountingRouter.get('/journal-entries', listJournalEntries);
+accountingRouter.post('/journal-entries/import', uploadExcelFile.single('file'), importJournalEntries);
 accountingRouter.post('/journal-entries', createJournalEntry);
 accountingRouter.put('/journal-entries/:id', updateJournalEntry);
 accountingRouter.delete('/journal-entries/:id', deleteJournalEntry);

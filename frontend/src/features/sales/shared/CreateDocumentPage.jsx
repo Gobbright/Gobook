@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Calendar, CheckCircle2, Lock,
   Phone, Plus, RefreshCw, Search,
@@ -155,6 +156,28 @@ function normalizeCustomer(customer = {}) {
   };
 }
 
+function phoneKey(phone) {
+  return String(phone || '').replace(/\D/g, '').slice(-10);
+}
+
+function customerPayload(customer) {
+  const { _id, id, ...payload } = normalizeCustomer(customer);
+  return payload;
+}
+
+function formatDateInput(date = new Date()) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+function addDaysInput(dateInput, days) {
+  const d = dateInput ? new Date(`${dateInput}T00:00:00`) : new Date();
+  const offset = Number.isFinite(Number(days)) ? Number(days) : 0;
+  d.setDate(d.getDate() + offset);
+  return formatDateInput(d);
+}
+
 function normalizeProduct(product = {}) {
   const description = product.description || product.name || product.productName || '';
   return {
@@ -173,6 +196,9 @@ function normalizeProduct(product = {}) {
 
 export function CreateDocumentPage({ documentType = 'invoice', invoiceId }) {
   const config = documentConfigs[documentType] ?? documentConfigs.invoice;
+  const defaultInvoiceDate = formatDateInput();
+  const defaultPaymentTerms = '30';
+  const defaultDueDate = addDaysInput(defaultInvoiceDate, defaultPaymentTerms);
 
   // ── Core state ──
   const [items, setItems]               = useState([{ id: 1000, description: '', hsn: '', qty: 1, unit: 'Nos', rate: 0, discount: 0, gstRate: 18 }]);
@@ -181,9 +207,9 @@ export function CreateDocumentPage({ documentType = 'invoice', invoiceId }) {
   const [showPayment, setShowPayment]   = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [paymentData, setPaymentData]   = useState({
-    amount: '', date: '2026-06-02', notes: '',
+    amount: '', date: defaultInvoiceDate, notes: '',
     upiId: '', customerPhone: '', amountReceived: '',
-    utrNumber: '', bankName: '', creditDays: '30',
+    utrNumber: '', bankName: '', creditDays: defaultPaymentTerms,
   });
 
   const [customer, setCustomer] = useState({
@@ -192,13 +218,13 @@ export function CreateDocumentPage({ documentType = 'invoice', invoiceId }) {
 
   const [docMeta, setDocMeta] = useState({
     number: `${config.prefix}-0001`,
-    date: '2026-06-02',
-    dueDate: '2026-07-02',
+    date: defaultInvoiceDate,
+    dueDate: defaultDueDate,
     poRef: '',
     placeOfSupply: 'Tamil Nadu',
     invoiceType: 'regular',
     rcm: false,
-    paymentTerms: '30',
+    paymentTerms: defaultPaymentTerms,
   });
 
   const [docExtra, setDocExtra] = useState({
@@ -240,7 +266,15 @@ export function CreateDocumentPage({ documentType = 'invoice', invoiceId }) {
 
   // ── UI state ──
   const [showPreview, setShowPreview]           = useState(false);
+  const [autoPrintPreview, setAutoPrintPreview] = useState(false);
+  const [downloadPdfMode, setDownloadPdfMode]   = useState(false);
+  const [showPrintConfirm, setShowPrintConfirm] = useState(false);
   const [previewRedirectOnClose, setPreviewRedirectOnClose] = useState(false);
+  const [showEmailModal, setShowEmailModal]     = useState(false);
+  const [emailTo, setEmailTo]                   = useState('');
+  const [emailSending, setEmailSending]         = useState(false);
+  const [emailResult, setEmailResult]           = useState(null);
+  const [savedInvoiceId, setSavedInvoiceId]     = useState(invoiceId || null);
   const [showCustomerDrop, setShowCustomerDrop] = useState(false);
   const [customerQuery, setCustomerQuery]       = useState('');
   const [showPhoneDrop, setShowPhoneDrop]       = useState(false);
@@ -261,8 +295,11 @@ const [customFields, setCustomFields]         = useState([]);
   }
 
   function getEffectiveCustomer() {
-    const hasNewCustomer = Object.values(newCustomerForm).some((value) => String(value || '').trim());
-    if (!customer.name.trim() && hasNewCustomer) {
+    const hasInvoiceCustomerDraft = documentType === 'invoice' && Object.entries(newCustomerForm).some(([key, value]) => {
+      if (key === 'state' && value === BUSINESS_STATE) return false;
+      return String(value || '').trim();
+    });
+    if (hasInvoiceCustomerDraft) {
       return {
         ...customer,
         ...newCustomerForm,
@@ -398,13 +435,26 @@ const [customFields, setCustomFields]         = useState([]);
       state: normalized.state,
       pincode: normalized.pincode,
     });
+    setNewCustomerForm({
+      name: normalized.name,
+      gstin: normalized.gstin,
+      phone: normalized.phone,
+      email: normalized.email,
+      address: normalized.address,
+      city: normalized.city,
+      state: normalized.state,
+      pincode: normalized.pincode,
+    });
     if (config.showGst) setSupplyType(normalized.state === BUSINESS_STATE ? 'intrastate' : 'interstate');
+    clearError('customerName');
+    if (normalized.gstin) clearError('customerGstin');
     setShowCustomerDrop(false);
     setCustomerQuery('');
   }
 
   function clearCustomer() {
     setCustomer({ name: '', gstin: '', phone: '', email: '', address: '', city: '', state: BUSINESS_STATE, pincode: '' });
+    setNewCustomerForm({ name: '', gstin: '', phone: '', email: '', address: '', city: '', state: BUSINESS_STATE, pincode: '' });
     setShowAddCustomer(false);
     setCustomerSaveError('');
     if (config.showGst) setSupplyType('intrastate');
@@ -414,6 +464,11 @@ const [customFields, setCustomFields]         = useState([]);
     setNewCustomerForm((p) => ({ ...p, [field]: value }));
     if (field === 'name' && value.trim()) clearError('customerName');
     if (field === 'gstin' && value.trim()) clearError('customerGstin');
+  }
+
+  function updateInvoiceCustomerField(field, value) {
+    updateCustomer(field, value);
+    updateNewCustomer(field, value);
   }
 
   async function handleCreateCustomer() {
@@ -428,7 +483,6 @@ const [customFields, setCustomFields]         = useState([]);
       setCustomers((prev) => [...prev, created]);
       selectCustomer(created);
       setShowAddCustomer(false);
-      setNewCustomerForm({ name: '', gstin: '', phone: '', email: '', address: '', city: '', state: BUSINESS_STATE, pincode: '' });
     } catch (err) {
       setCustomerSaveError(err.message || 'Unable to save customer');
     } finally {
@@ -436,7 +490,60 @@ const [customFields, setCustomFields]         = useState([]);
     }
   }
 
-  function updateMeta(field, value)  { setDocMeta((p) => ({ ...p, [field]: value })); }
+  async function rememberCustomerForPhone(customerData) {
+    const normalized = normalizeCustomer(customerData);
+    const digits = phoneKey(normalized.phone);
+    if (!normalized.name.trim() || digits.length < 10) return normalized;
+
+    try {
+      const localMatch = customers.find((c) => phoneKey(c.phone) === digits);
+      const remoteRows = localMatch ? [] : await api.listCustomers(digits);
+      const remoteMatch = (Array.isArray(remoteRows) ? remoteRows : remoteRows?.data || [])
+        .map(normalizeCustomer)
+        .find((c) => phoneKey(c.phone) === digits);
+      const match = localMatch ? normalizeCustomer(localMatch) : remoteMatch;
+
+      if (match?._id || match?.id) {
+        const id = match._id || match.id;
+        const merged = {
+          ...match,
+          ...Object.fromEntries(Object.entries(normalized).filter(([, value]) => String(value || '').trim())),
+          phone: normalized.phone,
+        };
+        const updated = normalizeCustomer(await api.updateCustomer(id, customerPayload(merged)));
+        setCustomers((prev) => {
+          const exists = prev.some((c) => (c._id || c.id) === (updated._id || updated.id));
+          return exists
+            ? prev.map((c) => ((c._id || c.id) === (updated._id || updated.id) ? updated : c))
+            : [...prev, updated];
+        });
+        return updated;
+      }
+
+      const created = normalizeCustomer(await api.createCustomer(customerPayload(normalized)));
+      setCustomers((prev) => [...prev, created]);
+      return created;
+    } catch (err) {
+      console.warn('Unable to remember customer for phone lookup', err);
+      return normalized;
+    }
+  }
+
+  function updateMeta(field, value)  {
+    setDocMeta((p) => {
+      const next = { ...p, [field]: value };
+      if (field === 'date' && config.showDueDate) {
+        next.dueDate = addDaysInput(value, next.paymentTerms || defaultPaymentTerms);
+      }
+      if (field === 'paymentTerms' && config.showDueDate) {
+        next.dueDate = addDaysInput(next.date, value || defaultPaymentTerms);
+      }
+      return next;
+    });
+    if (field === 'date') {
+      setPaymentData((p) => ({ ...p, date: value }));
+    }
+  }
   function updateExtra(field, value) { setDocExtra((p) => ({ ...p, [field]: value })); }
   function updatePayment(field, value){ setPaymentData((p) => ({ ...p, [field]: value })); }
 
@@ -492,8 +599,8 @@ const [customFields, setCustomFields]         = useState([]);
 
   function removeCharge(id) { setCharges((prev) => prev.filter((c) => c.id !== id)); }
 
-  function buildPayload() {
-    const effectiveCustomer = getEffectiveCustomer();
+  function buildPayload(customerOverride) {
+    const effectiveCustomer = customerOverride || getEffectiveCustomer();
     return {
       number: docMeta.number,
       documentType,
@@ -530,7 +637,7 @@ const [customFields, setCustomFields]         = useState([]);
     'e-way-bill':       '#/billing/e-way-bill',
   };
 
-  async function handleSave({ openPreview } = {}) {
+  async function handleSave({ openPreview, autoPrint } = {}) {
     setSaveError('');
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
@@ -539,25 +646,34 @@ const [customFields, setCustomFields]         = useState([]);
       return;
     }
     setErrors({});
+    if (openPreview && autoPrint) {
+      setAutoPrintPreview(true);
+      setPreviewRedirectOnClose(true);
+      setShowPreview(true);
+    }
     setSaveLoading(true);
     try {
-      const payload = buildPayload();
+      const rememberedCustomer = await rememberCustomerForPhone(getEffectiveCustomer());
+      const payload = buildPayload(rememberedCustomer);
+      let savedDoc;
       if (invoiceId) {
-        if (documentType === 'credit-note')           await api.updateCreditNote(invoiceId, payload);
-        else if (documentType === 'debit-note')       await api.updateDebitNote(invoiceId, payload);
-        else if (documentType === 'delivery-challan') await api.updateChallan(invoiceId, payload);
-        else if (documentType === 'e-invoice')        await api.updateEInvoice(invoiceId, payload);
-        else if (documentType === 'e-way-bill')       await api.updateEWayBill(invoiceId, payload);
-        else                                          await api.updateInvoice(invoiceId, payload);
+        if (documentType === 'credit-note')           savedDoc = await api.updateCreditNote(invoiceId, payload);
+        else if (documentType === 'debit-note')       savedDoc = await api.updateDebitNote(invoiceId, payload);
+        else if (documentType === 'delivery-challan') savedDoc = await api.updateChallan(invoiceId, payload);
+        else if (documentType === 'e-invoice')        savedDoc = await api.updateEInvoice(invoiceId, payload);
+        else if (documentType === 'e-way-bill')       savedDoc = await api.updateEWayBill(invoiceId, payload);
+        else                                          savedDoc = await api.updateInvoice(invoiceId, payload);
       } else {
-        if (documentType === 'credit-note')           await api.createCreditNote(payload);
-        else if (documentType === 'debit-note')       await api.createDebitNote(payload);
-        else if (documentType === 'delivery-challan') await api.createChallan(payload);
-        else if (documentType === 'e-invoice')        await api.createEInvoice(payload);
-        else if (documentType === 'e-way-bill')       await api.createEWayBill(payload);
-        else                                          await api.createInvoice(payload);
+        if (documentType === 'credit-note')           savedDoc = await api.createCreditNote(payload);
+        else if (documentType === 'debit-note')       savedDoc = await api.createDebitNote(payload);
+        else if (documentType === 'delivery-challan') savedDoc = await api.createChallan(payload);
+        else if (documentType === 'e-invoice')        savedDoc = await api.createEInvoice(payload);
+        else if (documentType === 'e-way-bill')       savedDoc = await api.createEWayBill(payload);
+        else                                          savedDoc = await api.createInvoice(payload);
       }
+      if (savedDoc?._id) setSavedInvoiceId(savedDoc._id);
       if (openPreview) {
+        if (!autoPrint) setAutoPrintPreview(false);
         setPreviewRedirectOnClose(true);
         setShowPreview(true);
       } else {
@@ -567,6 +683,79 @@ const [customFields, setCustomFields]         = useState([]);
       setSaveError(err.message || 'Unable to save');
     } finally {
       setSaveLoading(false);
+    }
+  }
+
+  function handlePrintBill() {
+    setSaveError('');
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTimeout(() => document.querySelector('[data-validation-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+      return;
+    }
+
+    setErrors({});
+    flushSync(() => {
+      setAutoPrintPreview(false);
+      setPreviewRedirectOnClose(false);
+      setShowPreview(true);
+    });
+    window.focus();
+    window.print();
+    setShowPrintConfirm(true);
+  }
+
+  function handleSharePdf() {
+    setShowShare(false);
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTimeout(() => document.querySelector('[data-validation-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+      return;
+    }
+    setErrors({});
+    setDownloadPdfMode(true);
+    setAutoPrintPreview(false);
+    setPreviewRedirectOnClose(false);
+    setShowPreview(true);
+  }
+
+  function handleShareEmail() {
+    setShowShare(false);
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTimeout(() => document.querySelector('[data-validation-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+      return;
+    }
+    setErrors({});
+    setEmailTo(getEffectiveCustomer().email || '');
+    setEmailResult(null);
+    setShowEmailModal(true);
+  }
+
+  async function handleSendEmail() {
+    if (!emailTo.trim()) return;
+    setEmailSending(true);
+    setEmailResult(null);
+    try {
+      const rememberedCustomer = await rememberCustomerForPhone(getEffectiveCustomer());
+      const payload = buildPayload(rememberedCustomer);
+      let docId = savedInvoiceId || invoiceId;
+      if (!docId) {
+        const saved = await api.createInvoice(payload);
+        docId = saved._id;
+        if (docId) setSavedInvoiceId(docId);
+      } else {
+        await api.updateInvoice(docId, payload);
+      }
+      await api.sendInvoiceEmail(docId, { toEmail: emailTo.trim() });
+      setEmailResult({ ok: true, msg: `Invoice sent to ${emailTo.trim()}` });
+    } catch (err) {
+      setEmailResult({ ok: false, msg: err.message || 'Failed to send email' });
+    } finally {
+      setEmailSending(false);
     }
   }
 
@@ -608,12 +797,39 @@ const [customFields, setCustomFields]         = useState([]);
     const digits = phoneDigits.slice(-10);
     if (digits.length < 10) return;
     const match = customers.find((c) => (c.phone || '').replace(/\D/g, '').slice(-10) === digits);
-    if (match && (match.name !== customer.name || match.gstin !== customer.gstin)) {
+    if (match && ['name', 'gstin', 'email', 'address', 'city', 'state', 'pincode'].some((field) => (match[field] || '') !== (customer[field] || ''))) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       selectCustomer(match);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneDigits, customers, documentType]);
+
+  useEffect(() => {
+    if (documentType !== 'invoice') return undefined;
+    const digits = phoneDigits.slice(-10);
+    if (digits.length < 10) return undefined;
+    if (customers.some((c) => phoneKey(c.phone) === digits)) return undefined;
+
+    let active = true;
+    async function findCustomerByPhone() {
+      try {
+        const result = await api.listCustomers(digits);
+        if (!active) return;
+        const rows = Array.isArray(result) ? result : result?.data;
+        const match = (Array.isArray(rows) ? rows : [])
+          .map(normalizeCustomer)
+          .find((c) => phoneKey(c.phone) === digits);
+        if (!match) return;
+        setCustomers((prev) => prev.some((c) => phoneKey(c.phone) === digits) ? prev : [...prev, match]);
+        if (!customer.name.trim()) selectCustomer(match);
+      } catch (err) {
+        console.warn('Unable to find customer by phone', err);
+      }
+    }
+    findCustomerByPhone();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phoneDigits, documentType]);
 
   useEffect(() => {
     let active = true;
@@ -697,13 +913,13 @@ const [customFields, setCustomFields]         = useState([]);
       });
       setDocMeta({
         number: invoice.number || `${config.prefix}-0001`,
-        date: invoice.meta?.date || '2026-06-02',
-        dueDate: invoice.meta?.dueDate || '2026-07-02',
+        date: invoice.meta?.date || defaultInvoiceDate,
+        dueDate: invoice.meta?.dueDate || addDaysInput(invoice.meta?.date || defaultInvoiceDate, invoice.meta?.paymentTerms || defaultPaymentTerms),
         poRef: invoice.meta?.poRef || '',
         placeOfSupply: invoice.meta?.placeOfSupply || BUSINESS_STATE,
         invoiceType: invoice.meta?.invoiceType || 'regular',
         rcm: invoice.meta?.rcm || false,
-        paymentTerms: invoice.meta?.paymentTerms || '30',
+        paymentTerms: invoice.meta?.paymentTerms || defaultPaymentTerms,
       });
       setSupplyType(invoice.supplyType || 'intrastate');
       setItems((Array.isArray(invoice.items) ? invoice.items : []).map((item, index) => ({ id: item.id ?? index + 1, ...item })));
@@ -762,12 +978,12 @@ const [customFields, setCustomFields]         = useState([]);
   // sees fresh state/handlers without needing to re-bind on every keystroke.
   const shortcutState = useRef(null);
   useEffect(() => {
-    shortcutState.current = { showPreview, previewRedirectOnClose, showShare, saveLoading, handleSave, addItem };
+    shortcutState.current = { showPreview, previewRedirectOnClose, showShare, saveLoading, handleSave, handlePrintBill, addItem };
   });
 
   useEffect(() => {
     function handleKeyDown(e) {
-      const { showPreview, previewRedirectOnClose, showShare, saveLoading, handleSave, addItem } = shortcutState.current;
+      const { showPreview, previewRedirectOnClose, showShare, saveLoading, handleSave, handlePrintBill, addItem } = shortcutState.current;
       const mod = e.ctrlKey || e.metaKey;
 
       if (e.key === 'Escape') {
@@ -794,12 +1010,8 @@ const [customFields, setCustomFields]         = useState([]);
       }
 
       if (mod && e.key.toLowerCase() === 'p') {
-        // Let the browser print the on-screen preview when it's already open;
-        // otherwise open the preview first instead of printing the raw form.
-        if (!showPreview) {
-          e.preventDefault();
-          setShowPreview(true);
-        }
+        e.preventDefault();
+        if (!saveLoading) handlePrintBill();
         return;
       }
 
@@ -816,8 +1028,8 @@ const [customFields, setCustomFields]         = useState([]);
         const F8_FKEY = { invoice: 'notes', quotation: 'notes', 'purchase-order': 'notes', 'credit-note': 'reason', 'debit-note': 'reason', 'delivery-challan': 'transporter', 'e-invoice': 'notes', 'e-way-bill': 'distance' };
         if (e.key === 'F1')  { e.preventDefault(); window.location.assign(NEW_ROUTES[documentType] ?? '#/billing/invoice/new'); return; }
         if (e.key === 'F2')  { e.preventDefault(); if (!saveLoading) handleSave(); return; }
-        if (e.key === 'F3')  { e.preventDefault(); setShowPreview(true); return; }
-        if (e.key === 'F4')  { e.preventDefault(); setShowPreview(true); return; }
+        if (e.key === 'F3')  { e.preventDefault(); setAutoPrintPreview(false); setShowPreview(true); return; }
+        if (e.key === 'F4')  { e.preventDefault(); if (!saveLoading) handlePrintBill(); return; }
         if (e.key === 'F5')  { e.preventDefault(); addItem(); return; }
         if (e.key === 'F6')  { e.preventDefault(); document.querySelector('[data-fkey="party"]')?.focus(); return; }
         if (e.key === 'F7')  { e.preventDefault(); const f7k = F7_FKEY[documentType]; if (f7k) { document.querySelector(`[data-fkey="${f7k}"]`)?.focus(); } else { setShowAddDiscount((v) => !v); } return; }
@@ -853,7 +1065,7 @@ const [customFields, setCustomFields]         = useState([]);
   // ── JSX ──────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 md:p-7 pb-16">
+    <div className="p-4 md:p-7 pb-32">
 
       {/* ── Page Header ── */}
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 mb-6">
@@ -880,7 +1092,16 @@ const [customFields, setCustomFields]         = useState([]);
             {showShare && (
               <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-[#dde6f2] rounded-lg shadow-lg py-1" style={{ minWidth: 200 }}>
                 {SHARE_OPTIONS.map((opt) => (
-                  <button key={opt.id} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-[13px] hover:bg-gray-50 cursor-pointer border-0 bg-transparent font-[inherit]" type="button" onClick={() => setShowShare(false)}>
+                  <button
+                    key={opt.id}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-[13px] hover:bg-gray-50 cursor-pointer border-0 bg-transparent font-[inherit]"
+                    type="button"
+                    onClick={() => {
+                      if (opt.id === 'pdf') { handleSharePdf(); }
+                      else if (opt.id === 'email') { handleShareEmail(); }
+                      else { setShowShare(false); }
+                    }}
+                  >
                     <span className="flex-none" style={{ color: opt.color }}>{opt.icon}</span>
                     <span className="flex flex-col gap-0.5">
                       <span className="font-medium text-[#111827]">{opt.label}</span>
@@ -892,11 +1113,11 @@ const [customFields, setCustomFields]         = useState([]);
             )}
           </div>
 
-          <button className={cx.btnOutline} type="button">
+          <button className={cx.btnOutline} type="button" disabled={saveLoading} onClick={handlePrintBill} title="Print Bill (Ctrl+P)">
             <svg fill="none" height="15" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="15"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2" /><rect height="8" width="12" x="6" y="14" /></svg>
-            Print
+            {saveLoading ? 'Saving...' : 'Print'}
           </button>
-          <button className={cx.btnOutline} type="button" onClick={() => setShowPreview(true)} title="Preview / Print (Ctrl+P)">
+          <button className={cx.btnOutline} type="button" onClick={() => { setAutoPrintPreview(false); setShowPreview(true); }} title="Preview PDF">
             <svg fill="none" height="15" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="15"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
             Preview PDF
           </button>
@@ -937,13 +1158,13 @@ const [customFields, setCustomFields]         = useState([]);
       )}
 
       {/* ── Document Card ── */}
-      <div className="flex flex-col gap-5">
+      <div className="bg-white border border-[#dfe7f1] rounded-lg">
 
         {/* ── Parties + Meta ── */}
-        <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.35fr_1fr] gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 border-b border-[#edf2f7]">
 
           {/* Bill From */}
-          <div className="bg-white border border-[#dfe7f1] rounded-lg p-5 flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <div className="text-xs font-semibold uppercase text-[#536173] tracking-wide mb-1">Bill From</div>
             <div className="flex items-start gap-3">
               {bizSettings.logoUrl ? (
@@ -969,7 +1190,7 @@ const [customFields, setCustomFields]         = useState([]);
           </div>
 
           {/* Bill To — with customer search */}
-          <div className="bg-white border border-[#dfe7f1] rounded-lg p-5 flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
             <div className="text-xs font-semibold uppercase text-[#536173] tracking-wide mb-1">{config.partyToLabel}</div>
 
             {documentType === 'invoice' ? (
@@ -988,7 +1209,7 @@ const [customFields, setCustomFields]         = useState([]);
                       placeholder="Enter phone number to find customer"
                       value={customer.phone}
                       onFocus={() => setShowPhoneDrop(true)}
-                      onChange={(e) => { updateCustomer('phone', e.target.value); setShowPhoneDrop(true); }}
+                      onChange={(e) => { updateInvoiceCustomerField('phone', e.target.value); setShowPhoneDrop(true); }}
                     />
                     {showPhoneDrop && matchingByPhone.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-white border border-[#dde6f2] rounded-lg shadow-lg py-1 max-h-56 overflow-y-auto">
@@ -1009,7 +1230,7 @@ const [customFields, setCustomFields]         = useState([]);
                   <span className="text-[11px] text-[#94a3b8]">Matching customer details fill in automatically.</span>
                 </div>
 
-                {customer.name ? (
+                {false && customer.name ? (
                   <div className="bg-[#fafbfe] border border-[#edf2f7] rounded-lg px-4 py-3 flex flex-col gap-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[13px] font-semibold text-[#111827]">{customer.name}</span>
@@ -1025,34 +1246,24 @@ const [customFields, setCustomFields]         = useState([]);
                       </div>
                     )}
                   </div>
-                ) : !showAddCustomer ? (
-                  <button
-                    type="button"
-                    className="w-full flex items-center justify-center gap-2 text-[13px] text-blue-600 font-medium border border-dashed border-blue-200 rounded-md py-2.5 bg-blue-50/40 hover:bg-blue-50 cursor-pointer font-[inherit]"
-                    onClick={() => { setShowAddCustomer(true); setNewCustomerForm((f) => ({ ...f, phone: customer.phone })); }}
-                  >
-                    <UserPlus size={13} /> Add New Customer
-                  </button>
                 ) : (
-                  <div className="flex flex-col gap-2.5 border border-[#edf2f7] rounded-lg p-3.5 bg-[#fafbfe]">
-                    <div className="text-[12px] font-semibold text-[#374151]">New Customer Details</div>
-                    <div className={cx.field}>
-                      <label className={cx.label}>Name *</label>
-                      <input className={cx.input} placeholder="Customer / company name" value={newCustomerForm.name} onChange={(e) => updateNewCustomer('name', e.target.value)} />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="flex flex-col gap-2.5">
+                    <div className="grid grid-cols-1 gap-2.5 items-end">
                       <div className={cx.field}>
-                        <label className={cx.label}>Phone</label>
-                        <input className={cx.input} placeholder="+91 XXXXX XXXXX" value={newCustomerForm.phone} onChange={(e) => updateNewCustomer('phone', e.target.value)} />
+                        <label className={cx.label}>Customer Name *</label>
+                        <input data-fkey="party" className={errors.customerName ? cx.inputError : cx.input} placeholder="Type customer name" value={newCustomerForm.name} onChange={(e) => updateNewCustomer('name', e.target.value)} />
                       </div>
+                    </div>
+                    <div className="flex flex-col gap-2.5 border border-[#edf2f7] rounded-lg p-3.5 bg-[#fafbfe]">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div className={cx.field}>
                         <label className={cx.label}>GSTIN</label>
                         <input className={cx.input} maxLength={15} placeholder="15-digit GSTIN" value={newCustomerForm.gstin} onChange={(e) => updateNewCustomer('gstin', e.target.value.toUpperCase())} />
                       </div>
-                    </div>
-                    <div className={cx.field}>
-                      <label className={cx.label}>Email</label>
-                      <input className={cx.input} placeholder="customer@email.com" type="email" value={newCustomerForm.email} onChange={(e) => updateNewCustomer('email', e.target.value)} />
+                      <div className={cx.field}>
+                        <label className={cx.label}>Email</label>
+                        <input className={cx.input} placeholder="customer@email.com" type="email" value={newCustomerForm.email} onChange={(e) => updateNewCustomer('email', e.target.value)} />
+                      </div>
                     </div>
                     <div className={cx.field}>
                       <label className={cx.label}>Billing Address</label>
@@ -1076,12 +1287,17 @@ const [customFields, setCustomFields]         = useState([]);
                     </div>
                     {customerSaveError && <div className="text-[12px] text-red-600">{customerSaveError}</div>}
                     <div className="flex items-center gap-2 mt-1">
+                      {!customer.name && (
                       <button type="button" className={cx.btnPrimary} disabled={customerSaving} onClick={handleCreateCustomer}>
                         {customerSaving ? 'Saving…' : 'Save Customer'}
                       </button>
-                      <button type="button" className={cx.btnOutline} onClick={() => { setShowAddCustomer(false); setCustomerSaveError(''); }}>
-                        Cancel
-                      </button>
+                      )}
+                      {(customer.name || newCustomerForm.name) && (
+                        <button type="button" className={cx.btnOutline} onClick={clearCustomer}>
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     </div>
                   </div>
                 )}
@@ -1114,7 +1330,7 @@ const [customFields, setCustomFields]         = useState([]);
                         className="flex-1 text-[13px] outline-none font-[inherit] text-[#111827]"
                         placeholder="Search by name or GSTIN…"
                         value={customerQuery}
-                        onChange={(e) => { setCustomerQuery(e.target.value); updateCustomer('name', e.target.value); }}
+                        onChange={(e) => { setCustomerQuery(e.target.value); updateCustomer('name', e.target.value); clearError('customerName'); }}
                       />
                     </div>
                     {filteredCustomers.length === 0 ? (
@@ -1227,7 +1443,7 @@ const [customFields, setCustomFields]         = useState([]);
           </div>
 
           {/* Invoice Meta */}
-          <div className="bg-white border border-[#dfe7f1] rounded-lg p-5 flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="inline-block text-xs font-bold uppercase text-blue-700 bg-[#eef5ff] rounded-md px-2.5 py-1.5">{config.title}</span>
               {documentType === 'e-way-bill' && (
@@ -1348,7 +1564,7 @@ const [customFields, setCustomFields]         = useState([]);
 
         {/* ── Shipping Address (when different) ── */}
         {!sameShipping && (
-          <div className="bg-white border border-[#dfe7f1] rounded-lg px-5 py-5">
+          <div className="px-6 py-5 border-b border-[#edf2f7] bg-[#fafbfe]">
             <h3 className="m-0 text-[15px] font-semibold mb-4">Shipping Address</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               <div className={cx.field}>
@@ -1377,7 +1593,7 @@ const [customFields, setCustomFields]         = useState([]);
 
         {/* ── Original Invoice Ref (credit / debit notes) ── */}
         {config.showOriginalRef && (
-          <div className="bg-white border border-[#dfe7f1] rounded-lg px-5 py-5">
+          <div className="px-6 py-5 border-b border-[#edf2f7]">
             <h3 className="m-0 text-[15px] font-semibold mb-4">Original Invoice Reference</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className={cx.field}>
@@ -1400,7 +1616,7 @@ const [customFields, setCustomFields]         = useState([]);
 
         {/* ── Transport Details ── */}
         {config.showTransport && (
-          <div className="bg-white border border-[#dfe7f1] rounded-lg px-5 py-5">
+          <div className="px-6 py-5 border-b border-[#edf2f7]">
             <h3 className="m-0 text-[15px] font-semibold mb-3">Transport Details</h3>
             {config.showEWayBillFields && (
               <div className="mb-4 flex items-start gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
@@ -1448,7 +1664,7 @@ const [customFields, setCustomFields]         = useState([]);
         )}
 
         {/* ── Items & Services ── */}
-        <div className="bg-white border border-[#dfe7f1] rounded-lg px-5 py-5">
+        <div className="px-6 py-5 border-b border-[#edf2f7]">
           <div className="mb-4">
             <h3 className="m-0 text-[15px] font-semibold">Items &amp; Services</h3>
           </div>
@@ -1567,7 +1783,7 @@ const [customFields, setCustomFields]         = useState([]);
         </div>
 
         {/* ── Additional Charges ── */}
-        <div className="bg-white border border-[#dfe7f1] rounded-lg px-5 py-5">
+        <div className="px-6 py-5 border-b border-[#edf2f7]">
           <div className="flex items-center justify-between mb-3">
             <h3 className="m-0 text-[14px] font-semibold text-[#374151]">Additional Charges</h3>
             <div className="flex items-center gap-2 flex-wrap">
@@ -1648,10 +1864,10 @@ const [customFields, setCustomFields]         = useState([]);
         </div>
 
         {/* ── Footer: Notes + Totals ── */}
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8 p-6">
 
           {/* LEFT column */}
-          <div className="bg-white border border-[#dfe7f1] rounded-lg p-5 flex flex-col gap-5">
+          <div className="flex flex-col gap-5">
 
             {/* Notes to Customer */}
             <div className="flex flex-col gap-2">
@@ -1760,7 +1976,7 @@ const [customFields, setCustomFields]         = useState([]);
           </div>
 
           {/* RIGHT column — Tax Summary + Totals + Signature */}
-          <div className="bg-white border border-[#dfe7f1] rounded-lg p-5 flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
 
             {/* Tax Summary */}
             {config.showGst && (
@@ -2006,7 +2222,7 @@ const [customFields, setCustomFields]         = useState([]);
 
         {/* ── Payment Recording ── */}
         {config.showPayment && (
-          <div className="bg-white border border-[#dfe7f1] rounded-lg overflow-hidden">
+          <div className="border-t border-[#edf2f7] mb-16">
             <button
               className="w-full flex justify-between items-center px-6 py-4 text-left border-0 bg-transparent cursor-pointer hover:bg-gray-50 font-[inherit]"
               type="button"
@@ -2142,7 +2358,7 @@ const [customFields, setCustomFields]         = useState([]);
       {showPreview && (
         <DocumentPreviewModal
           config={config}
-          customer={customer}
+          customer={getEffectiveCustomer()}
           docMeta={docMeta}
           docExtra={docExtra}
           items={items}
@@ -2158,8 +2374,13 @@ const [customFields, setCustomFields]         = useState([]);
           tcs={tcs}
           advanceAmt={advanceAmt}
           addDiscount={addDiscount}
+          autoPrint={autoPrintPreview}
+          downloadAsPdf={downloadPdfMode}
+          invoiceNumber={docMeta.number}
           onClose={() => {
             setShowPreview(false);
+            setAutoPrintPreview(false);
+            setDownloadPdfMode(false);
             if (previewRedirectOnClose) {
               window.location.assign(LIST_ROUTES[documentType] ?? '#/billing/invoice');
             }
@@ -2167,7 +2388,75 @@ const [customFields, setCustomFields]         = useState([]);
         />
       )}
 
+      {/* ── Email Modal ── */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 print:hidden">
+          <div className="w-full max-w-sm rounded-xl border border-[#dfe7f1] bg-white shadow-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-semibold text-[15px] text-[#111827]">Send Invoice by Email</div>
+              <button type="button" className="text-gray-400 hover:text-gray-600 border-0 bg-transparent cursor-pointer" onClick={() => setShowEmailModal(false)}>
+                <svg fill="none" height="18" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-[#536173] mb-1">Send To</label>
+            <input
+              type="email"
+              className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] w-full outline-none focus:border-blue-500 font-[inherit] mb-4"
+              placeholder="customer@email.com"
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              disabled={emailSending}
+            />
+            {emailResult && (
+              <div className={`text-[13px] rounded-md px-3 py-2 mb-3 ${emailResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                {emailResult.msg}
+              </div>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button type="button" className={cx.btnOutline} onClick={() => setShowEmailModal(false)} disabled={emailSending}>Cancel</button>
+              <button
+                type="button"
+                className={cx.btnPrimary}
+                disabled={emailSending || !emailTo.trim()}
+                onClick={handleSendEmail}
+              >
+                {emailSending ? 'Sending…' : 'Send Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── F-Key Shortcut Bar ── */}
+      {showPrintConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 px-4 print:hidden">
+          <div className="w-full max-w-sm rounded-lg border border-[#dfe7f1] bg-white shadow-xl">
+            <div className="border-b border-[#edf2f7] px-5 py-4">
+              <div className="text-[15px] font-semibold text-[#111827]">Was the bill printed?</div>
+              <div className="mt-1 text-[12px] text-[#536173]">
+                Save it to the invoice list only if the print was completed.
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4">
+              <button type="button" className={cx.btnOutline} onClick={() => setShowPrintConfirm(false)}>
+                No, Keep Draft
+              </button>
+              <button
+                type="button"
+                className={cx.btnPrimary}
+                disabled={saveLoading}
+                onClick={() => {
+                  setShowPrintConfirm(false);
+                  handleSave();
+                }}
+              >
+                {saveLoading ? 'Saving...' : 'Yes, Save Bill'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className="fixed bottom-0 left-0 right-0 md:left-60 z-30 select-none"
         style={{ background: '#062844', borderTop: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 -4px 16px rgba(0,0,0,0.25)' }}
@@ -2184,8 +2473,8 @@ const [customFields, setCustomFields]         = useState([]);
             return [
               { key: 'F1',  label: f1Label,   action: () => window.location.assign(newRoute) },
               { key: 'F2',  label: 'Save',     action: () => { if (!saveLoading) handleSave(); } },
-              { key: 'F3',  label: 'Preview',  action: () => setShowPreview(true) },
-              { key: 'F4',  label: 'Print',    action: () => setShowPreview(true) },
+              { key: 'F3',  label: 'Preview',  action: () => { setAutoPrintPreview(false); setShowPreview(true); } },
+              { key: 'F4',  label: 'Print',    action: () => { if (!saveLoading) handlePrintBill(); } },
               { key: 'F5',  label: 'Add Item', action: () => addItem() },
               { key: 'F6',  label: f6Label,    action: () => document.querySelector('[data-fkey="party"]')?.focus() },
               { key: 'F7',  label: f7Label,    action: () => { if (f7fkey) { document.querySelector(`[data-fkey="${f7fkey}"]`)?.focus(); } else { setShowAddDiscount((v) => !v); } } },

@@ -144,12 +144,22 @@ function normalizePO(inv) {
 
 // ── Main page ──────────────────────────────────────────────────
 
+const PAGE_SIZE = 5;
+
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+  if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+  return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
 export function PurchaseOrderPage() {
   const [search, setSearch] = useState('');
   const [openMenu, setOpenMenu] = useState(null);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [orders, setOrders] = useState([]);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -191,6 +201,11 @@ export function PurchaseOrderPage() {
       return true;
     });
   }, [dateFrom, dateTo, search, orders]);
+
+  useEffect(() => { setPage(1); }, [dateFrom, dateTo, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const exportColumns = [
     { label: 'PO No.', value: (row) => row.number },
     { label: 'Vendor', value: (row) => row.customer?.name || '' },
@@ -322,7 +337,7 @@ export function PurchaseOrderPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((o) => (
+                paginated.map((o) => (
                   <tr key={o.id} className="border-t border-[#edf2f7] hover:bg-[#fafbfe] transition-colors">
 
                     {/* PO number */}
@@ -383,15 +398,16 @@ export function PurchaseOrderPage() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-[#edf2f7] flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[13px] text-[#536173]">
-            Showing <span className="font-medium text-[#374151]">{filtered.length}</span> of{' '}
-            <span className="font-medium text-[#374151]">{orders.length}</span> purchase orders
-          </span>
+        <div className="px-4 py-3 border-t border-[#edf2f7] flex items-center justify-between text-[13px] text-[#536173]">
+          <span>Showing {paginated.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
           <div className="flex items-center gap-1">
-            <button type="button" className="px-3 py-1.5 border border-[#dbe4ef] rounded text-[13px] text-[#374151] bg-white hover:bg-gray-50 cursor-pointer font-[inherit]">← Prev</button>
-            <button type="button" className="px-3 py-1.5 border border-blue-600 rounded text-[13px] font-semibold text-white bg-blue-600 cursor-pointer font-[inherit]">1</button>
-            <button type="button" className="px-3 py-1.5 border border-[#dbe4ef] rounded text-[13px] text-[#374151] bg-white hover:bg-gray-50 cursor-pointer font-[inherit]">Next →</button>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">←</button>
+            {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+              <span key={`ellipsis-${i}`} className="px-2 py-1 text-[12px] text-[#536173]">…</span>
+            ) : (
+              <button key={p} onClick={() => setPage(p)} className={`px-2 py-1 text-[12px] border rounded font-[inherit] cursor-pointer ${p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-[#dbe4ef] hover:bg-gray-50 bg-white'}`}>{p}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">→</button>
           </div>
         </div>
 

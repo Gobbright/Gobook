@@ -15,6 +15,15 @@ const VCH_BADGE = {
   CB:         'text-purple-700 bg-purple-50',
 };
 
+const PAGE_SIZE = 5;
+
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+  if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+  return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
 export function BankBookPage() {
   const [dateFrom, setDateFrom] = useState('2026-05-01');
   const [dateTo,   setDateTo]   = useState('2026-05-31');
@@ -26,6 +35,7 @@ export function BankBookPage() {
     accountType: '',
   });
   const [bankEntries, setBankEntries] = useState([]);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let isMounted = true;
@@ -60,6 +70,11 @@ export function BankBookPage() {
   const totalWithdrawals = entries.reduce((a, r) => a + r.withdrawal, 0);
   const openingBal       = filteredEntries.find((r) => r.vchType === 'OB')?.balance ?? 0;
   const closingBal       = openingBal + totalDeposits - totalWithdrawals;
+
+  useEffect(() => { setPage(1); }, [dateFrom, dateTo, bank]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
+  const paginated = filteredEntries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const exportColumns = [
     { label: 'Date', value: (row) => row.date },
     { label: 'Voucher Type', value: (row) => row.vchType },
@@ -142,7 +157,7 @@ export function BankBookPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredEntries.map((row, i) => {
+              {paginated.map((row, i) => {
                 const isSpecial = row.vchType === 'OB' || row.vchType === 'CB';
                 return (
                   <tr key={i} className={`hover:bg-gray-50 ${isSpecial ? 'bg-[#f8fafc]' : ''}`}>
@@ -174,6 +189,18 @@ export function BankBookPage() {
               </tr>
             </tfoot>
           </table>
+        </div>
+        <div className="px-5 py-3 border-t border-[#edf2f7] flex items-center justify-between text-[13px] text-[#536173]">
+          <span>Showing {paginated.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredEntries.length)} of {filteredEntries.length}</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">←</button>
+            {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+              <span key={`ellipsis-${i}`} className="px-2 py-1 text-[12px] text-[#536173]">…</span>
+            ) : (
+              <button key={p} onClick={() => setPage(p)} className={`px-2 py-1 text-[12px] border rounded font-[inherit] cursor-pointer ${p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-[#dbe4ef] hover:bg-gray-50 bg-white'}`}>{p}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">→</button>
+          </div>
         </div>
       </div>
     </div>

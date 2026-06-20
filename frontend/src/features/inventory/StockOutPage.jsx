@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { DateRangeFilter } from '../../components/forms/DateRangeFilter.jsx';
 import { ExportButtons } from '../../components/forms/ExportButtons.jsx';
@@ -124,6 +124,13 @@ export function StockOutPage() {
 
   const LIMIT = 5;
 
+  const fetchAllForExport = useCallback(async () => {
+    const params = { page: 1, limit: 9999, ...dateRangeParams(dateFrom, dateTo) };
+    if (search) params.search = search;
+    const res = await api.invListStockOut(params);
+    return res.data ?? [];
+  }, [dateFrom, dateTo, search]);
+
   function loadStats() { api.invStockOutStats().then(setStats).catch(() => {}); }
 
   function loadRecords() {
@@ -205,7 +212,7 @@ export function StockOutPage() {
             onToChange={(value) => { setDateTo(value); setPage(1); }}
             onClear={() => { setDateFrom(''); setDateTo(''); setPage(1); }}
           />
-          <ExportButtons title="Stock Out" filename="stock-out" rows={records} columns={exportColumns} />
+          <ExportButtons title="Stock Out" filename="stock-out" rows={records} columns={exportColumns} fetchRows={fetchAllForExport} />
         </div>
 
         {error && <div className="px-5 py-4 text-[13px] text-red-600">{error}</div>}

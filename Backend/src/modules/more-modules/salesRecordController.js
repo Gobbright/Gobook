@@ -1,11 +1,11 @@
 import { SalesRecord } from '../../models/SalesRecord.js';
 import { httpError } from '../../utils/httpError.js';
 
-async function nextNumber(type) {
+async function nextNumber(type, userId) {
   const prefixes = { quotation: 'QT', order: 'OR', invoice: 'SR' };
   const prefix = prefixes[type] ?? 'SR';
   const yr = new Date().getFullYear();
-  const last = await SalesRecord.findOne({ type }, { number: 1 }, { sort: { createdAt: -1 } });
+  const last = await SalesRecord.findOne({ userId, type }, { number: 1 }, { sort: { createdAt: -1 } });
   let seq = 1;
   if (last) {
     const parts = last.number.split('-');
@@ -19,7 +19,7 @@ async function nextNumber(type) {
 export async function listSalesRecords(req, res, next) {
   try {
     const { type, status, search } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (type && type !== 'all') filter.type = type;
     if (status && status !== 'All Status') filter.status = status;
     if (search) {
@@ -44,7 +44,7 @@ export async function listSalesRecords(req, res, next) {
 // GET /api/more-modules/sales-records/next-number?type=quotation
 export async function getNextNumber(req, res, next) {
   try {
-    const number = await nextNumber(req.query.type ?? 'quotation');
+    const number = await nextNumber(req.query.type ?? 'quotation', req.user.id);
     res.json({ number });
   } catch (err) {
     next(err);
@@ -54,8 +54,9 @@ export async function getNextNumber(req, res, next) {
 // POST /api/more-modules/sales-records
 export async function createSalesRecord(req, res, next) {
   try {
-    const body = { ...req.body };
-    if (!body.number) body.number = await nextNumber(body.type ?? 'quotation');
+    const userId = req.user.id;
+    const body = { ...req.body, userId };
+    if (!body.number) body.number = await nextNumber(body.type ?? 'quotation', userId);
     const record = await SalesRecord.create(body);
     res.status(201).json(record);
   } catch (err) {
@@ -67,8 +68,10 @@ export async function createSalesRecord(req, res, next) {
 // PUT /api/more-modules/sales-records/:id
 export async function updateSalesRecord(req, res, next) {
   try {
-    const record = await SalesRecord.findByIdAndUpdate(
-      req.params.id, { $set: req.body }, { new: true, runValidators: true },
+    const record = await SalesRecord.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: req.body },
+      { new: true, runValidators: true },
     ).lean();
     if (!record) return next(httpError(404, 'Sales record not found'));
     res.json(record);
@@ -80,7 +83,7 @@ export async function updateSalesRecord(req, res, next) {
 // DELETE /api/more-modules/sales-records/:id
 export async function deleteSalesRecord(req, res, next) {
   try {
-    const record = await SalesRecord.findByIdAndDelete(req.params.id).lean();
+    const record = await SalesRecord.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!record) return next(httpError(404, 'Sales record not found'));
     res.json({ message: 'Sales record deleted' });
   } catch (err) {

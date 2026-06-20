@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   createLead,
   deleteLead,
   getLeads,
+  importLeads,
   updateLead,
 } from '../../services/crmService.js';
 import { DateRangeFilter } from '../../components/forms/DateRangeFilter.jsx';
@@ -27,14 +28,28 @@ const TH = 'text-left text-xs font-semibold uppercase tracking-wide text-[#53617
 const TD = 'px-5 py-3.5 border-b border-[#f3f4f6] text-[13px]';
 const AVATAR_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#e11d48', '#65a30d'];
 
+const PAGE_SIZE = 5;
+
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+  if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+  return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
 export function LeadsPage() {
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [leads, setLeads] = useState([]);
+  const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_LEAD);
+  const [formError, setFormError] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   function loadLeads() {
     return getLeads()
@@ -58,6 +73,11 @@ export function LeadsPage() {
     return matchesSearch && isWithinDateRange(l.createdAt || l.updatedAt, dateFrom, dateTo);
   });
 
+  useEffect(() => { setPage(1); }, [search, dateFrom, dateTo]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const totalLeads = leads.length;
   const newLeads   = leads.filter((l) => l.status === 'New').length;
   const inProgress = leads.filter((l) => l.status === 'In Progress').length;
@@ -73,14 +93,36 @@ export function LeadsPage() {
   ];
 
   function updateForm(field, value) { setForm((f) => ({ ...f, [field]: value })); }
-  function resetForm() { setForm(EMPTY_LEAD); setEditingId(null); setShowForm(false); }
+  function resetForm() { setForm(EMPTY_LEAD); setEditingId(null); setShowForm(false); setFormError(''); }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (editingId) await updateLead(editingId, form);
-    else await createLead(form);
-    await loadLeads();
-    resetForm();
+    setFormError('');
+    try {
+      if (editingId) await updateLead(editingId, form);
+      else await createLead(form);
+      await loadLeads();
+      resetForm();
+    } catch (err) {
+      setFormError(err.message);
+    }
+  }
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    try {
+      const result = await importLeads(formData);
+      await loadLeads();
+      setImportResult(result);
+    } catch (err) {
+      setImportResult({ error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
   }
 
   function handleEdit(row) {
@@ -105,10 +147,17 @@ export function LeadsPage() {
           <h1 className="m-0 text-[22px] font-bold">Leads</h1>
           <p className="m-0 text-[13px] text-[#536173] mt-0.5">Track and manage your potential leads</p>
         </div>
-        <button className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button" onClick={() => setShowForm(true)}>
-          <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          Add Lead
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
+          <button type="button" disabled={importing} onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[#374151] bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit] disabled:opacity-60">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            {importing ? 'Importing...' : 'Import Excel'}
+          </button>
+          <button className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button" onClick={() => setShowForm(true)}>
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            Add Lead
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -130,11 +179,20 @@ export function LeadsPage() {
             </select>
             <input className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit]" placeholder="Owner" value={form.owner} onChange={(e) => updateForm('owner', e.target.value)} />
           </div>
+          {formError && <p className="text-[13px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-3">{formError}</p>}
           <div className="flex justify-end gap-2">
             <button className="px-4 py-2 text-[13px] font-medium text-gray-700 bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit]" type="button" onClick={resetForm}>Cancel</button>
             <button className="px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="submit">{editingId ? 'Update Lead' : 'Save Lead'}</button>
           </div>
         </form>
+      )}
+
+      {importResult && (
+        <div className={`mt-4 mb-0 px-4 py-3 rounded-lg text-[13px] border ${importResult.error ? 'bg-red-50 border-red-100 text-red-700' : 'bg-green-50 border-green-100 text-green-700'}`}>
+          {importResult.error ? importResult.error : `Import complete: ${importResult.imported ?? 0} added, ${importResult.updated ?? 0} updated${(importResult.skipped ?? 0) > 0 ? `, ${importResult.skipped} skipped` : ''}.`}
+          {importResult.errors?.length > 0 && <ul className="mt-1 list-disc pl-5 text-[12px]">{importResult.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}{importResult.errors.length > 5 && <li>...and {importResult.errors.length - 5} more</li>}</ul>}
+          <button type="button" onClick={() => setImportResult(null)} className="mt-1 text-[12px] underline bg-transparent border-0 cursor-pointer p-0 text-inherit font-[inherit]">Dismiss</button>
+        </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-5">
@@ -196,7 +254,7 @@ export function LeadsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row, i) => (
+              {paginated.map((row, i) => (
                 <tr key={row._id ?? i} className="hover:bg-gray-50">
                   <td className={TD}>
                     <div className="flex items-center gap-2.5">
@@ -231,8 +289,17 @@ export function LeadsPage() {
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-[#edf2f7] flex justify-between text-[13px] text-[#536173]">
-          <span>Showing {filtered.length} of {leads.length} leads</span>
+        <div className="px-5 py-3 border-t border-[#edf2f7] flex items-center justify-between text-[13px] text-[#536173]">
+          <span>Showing {paginated.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">←</button>
+            {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+              <span key={`ellipsis-${i}`} className="px-2 py-1 text-[12px] text-[#536173]">…</span>
+            ) : (
+              <button key={p} onClick={() => setPage(p)} className={`px-2 py-1 text-[12px] border rounded font-[inherit] cursor-pointer ${p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-[#dbe4ef] hover:bg-gray-50 bg-white'}`}>{p}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">→</button>
+          </div>
         </div>
       </div>
     </div>

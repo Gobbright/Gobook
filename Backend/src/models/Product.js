@@ -1,7 +1,8 @@
 import { Schema, model } from 'mongoose';
 
 const productSchema = new Schema({
-  code:          { type: String, required: true, trim: true, uppercase: true, unique: true },
+  userId:        { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
+  code:          { type: String, required: true, trim: true, uppercase: true },
   description:   { type: String, required: true, trim: true },
   hsn:           { type: String, trim: true, default: '' },
   unit:          { type: String, trim: true, default: 'Nos' },
@@ -14,6 +15,7 @@ const productSchema = new Schema({
   status:        { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
 }, { timestamps: true });
 
-productSchema.index({ description: 'text', code: 1, hsn: 1 });
+productSchema.index({ userId: 1, code: 1 }, { unique: true });
+productSchema.index({ userId: 1, description: 1, hsn: 1 });
 
 export const Product = model('Product', productSchema);

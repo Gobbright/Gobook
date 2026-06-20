@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const warehouseSchema = new Schema({
+  userId:   { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:     { type: String, required: true, trim: true },
   location: { type: String, trim: true, default: '' },
   manager:  { type: String, trim: true, default: '' },

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ExportButtons } from '../../components/forms/ExportButtons.jsx';
 import { api } from '../../services/api.js';
 
 const AVATAR_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#e11d48', '#65a30d'];
@@ -111,8 +112,20 @@ export function EmployeesPage() {
   const [depts, setDepts]       = useState(['All Departments']);
   const [loading, setLoading]   = useState(true);
   const [modal, setModal]       = useState(null); // null | 'add' | employee-object
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const LIMIT = 10;
+  const LIMIT = 5;
+
+  const fetchAllForExport = useCallback(async () => {
+    const params = { page: 1, limit: 9999 };
+    if (search) params.search = search;
+    if (dept !== 'All Departments') params.dept = dept;
+    if (status !== 'All Status') params.status = status;
+    const res = await api.hrListEmployees(params);
+    return res.data ?? [];
+  }, [search, dept, status]);
 
   const fetchDepts = useCallback(async () => {
     try { const d = await api.hrDepartments(); setDepts(['All Departments', ...d]); } catch (_) {}
@@ -148,7 +161,34 @@ export function EmployeesPage() {
 
   const handleSaved = () => { setModal(null); fetchEmployees(); fetchStats(); fetchDepts(); };
 
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    try {
+      const result = await api.hrImportEmployees(formData);
+      fetchEmployees(); fetchStats(); fetchDepts();
+      setImportResult(result);
+    } catch (err) {
+      setImportResult({ error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const exportColumns = [
+    { label: 'Employee ID', value: (row) => row.employeeId },
+    { label: 'Name', value: (row) => row.name },
+    { label: 'Department', value: (row) => row.dept },
+    { label: 'Designation', value: (row) => row.designation },
+    { label: 'Email', value: (row) => row.email },
+    { label: 'Phone', value: (row) => row.phone },
+    { label: 'Status', value: (row) => row.status },
+  ];
 
   return (
     <div className="p-4 md:p-7">
@@ -170,11 +210,26 @@ export function EmployeesPage() {
           <h1 className="m-0 text-[22px] font-bold">Employees</h1>
           <p className="m-0 text-[13px] text-[#536173] mt-0.5">Manage your organization employees</p>
         </div>
-        <button onClick={() => setModal('add')} className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button">
-          <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          Add Employee
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
+          <button type="button" disabled={importing} onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[#374151] bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit] disabled:opacity-60">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            {importing ? 'Importing...' : 'Import Excel'}
+          </button>
+          <button onClick={() => setModal('add')} className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            Add Employee
+          </button>
+        </div>
       </div>
+
+      {importResult && (
+        <div className={`mt-4 mb-0 px-4 py-3 rounded-lg text-[13px] border ${importResult.error ? 'bg-red-50 border-red-100 text-red-700' : 'bg-green-50 border-green-100 text-green-700'}`}>
+          {importResult.error ? importResult.error : `Import complete: ${importResult.imported ?? 0} added, ${importResult.updated ?? 0} updated${(importResult.skipped ?? 0) > 0 ? `, ${importResult.skipped} skipped` : ''}.`}
+          {importResult.errors?.length > 0 && <ul className="mt-1 list-disc pl-5 text-[12px]">{importResult.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}{importResult.errors.length > 5 && <li>...and {importResult.errors.length - 5} more</li>}</ul>}
+          <button type="button" onClick={() => setImportResult(null)} className="mt-1 text-[12px] underline bg-transparent border-0 cursor-pointer p-0 text-inherit font-[inherit]">Dismiss</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 my-5">
         {[
@@ -207,6 +262,7 @@ export function EmployeesPage() {
           <select className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit] text-[#536173] bg-white cursor-pointer" value={status} onChange={(e) => setStatus(e.target.value)}>
             {['All Status', 'Active', 'Inactive'].map((s) => <option key={s}>{s}</option>)}
           </select>
+          <ExportButtons title="Employees" filename="employees" rows={employees} columns={exportColumns} fetchRows={fetchAllForExport} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">

@@ -147,7 +147,7 @@ export function UsersRolesPage() {
       </div>
 
       {showForm && (
-        <form className="bg-white border border-[#dfe7f1] rounded-xl p-5 mt-5" onSubmit={handleSubmit}>
+        <form className="app-form-modal bg-white border border-[#dfe7f1] rounded-xl p-5 mt-5" onSubmit={handleSubmit}>
           <div className="flex justify-between items-center mb-4">
             <h3 className="m-0 text-[15px] font-semibold">{editingId ? 'Edit User' : 'New User'}</h3>
             <button className="text-[#536173] hover:text-[#111827] bg-transparent border-0 cursor-pointer text-xl font-[inherit]" type="button" onClick={resetForm}>×</button>

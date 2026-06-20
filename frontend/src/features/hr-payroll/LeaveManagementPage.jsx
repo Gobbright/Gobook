@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ExportButtons } from '../../components/forms/ExportButtons.jsx';
 import { api } from '../../services/api.js';
 
 const AVATAR_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#e11d48', '#65a30d'];
@@ -109,7 +110,14 @@ export function LeaveManagementPage() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal]     = useState(null);
 
-  const LIMIT = 10;
+  const LIMIT = 5;
+
+  const fetchAllForExport = useCallback(async () => {
+    const params = { page: 1, limit: 9999 };
+    if (status !== 'All Status') params.status = status;
+    const res = await api.hrListLeaves(params);
+    return res.data ?? [];
+  }, [status]);
 
   const fetchStats = useCallback(async () => {
     try { setStats(await api.hrLeaveStats()); } catch (_) {}
@@ -144,6 +152,17 @@ export function LeaveManagementPage() {
   const handleSaved = () => { setModal(null); fetchLeaves(); fetchStats(); };
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const exportColumns = [
+    { label: 'Leave ID', value: (row) => row.leaveId },
+    { label: 'Employee Name', value: (row) => row.name },
+    { label: 'Employee ID', value: (row) => row.empId },
+    { label: 'Leave Type', value: (row) => row.type },
+    { label: 'From', value: (row) => row.from },
+    { label: 'To', value: (row) => row.to },
+    { label: 'Days', value: (row) => row.days },
+    { label: 'Status', value: (row) => row.status },
+    { label: 'Applied On', value: (row) => row.applied },
+  ];
 
   return (
     <div className="p-4 md:p-7">
@@ -188,6 +207,7 @@ export function LeaveManagementPage() {
           <select className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit] text-[#536173] bg-white cursor-pointer" value={status} onChange={(e) => setStatus(e.target.value)}>
             {['All Status', 'Pending', 'Approved', 'Rejected'].map((s) => <option key={s}>{s}</option>)}
           </select>
+          <ExportButtons title="Leave Management" filename="leave-management" rows={leaves} columns={exportColumns} fetchRows={fetchAllForExport} />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">

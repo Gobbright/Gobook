@@ -7,8 +7,9 @@ const DOCTYPE = 'delivery-challan';
 export async function getNextChallanNumber(req, res, next) {
   try {
     const { prefix = 'DC' } = req.query;
+    const userId = req.user.id;
     const last = await Invoice.findOne(
-      { documentType: DOCTYPE, number: new RegExp(`^${prefix}-`, 'i') },
+      { userId, documentType: DOCTYPE, number: new RegExp(`^${prefix}-`, 'i') },
       { number: 1 },
       { sort: { createdAt: -1 } },
     );
@@ -28,7 +29,7 @@ export async function getNextChallanNumber(req, res, next) {
 export async function listChallans(req, res, next) {
   try {
     const { search, page = 1, limit = 50 } = req.query;
-    const filter = { documentType: DOCTYPE };
+    const filter = { userId: req.user.id, documentType: DOCTYPE };
     if (search) {
       filter.$or = [
         { number: new RegExp(search, 'i') },
@@ -54,7 +55,7 @@ export async function listChallans(req, res, next) {
 // GET /api/sales/challans/:id
 export async function getChallan(req, res, next) {
   try {
-    const doc = await Invoice.findOne({ _id: req.params.id, documentType: DOCTYPE }).lean();
+    const doc = await Invoice.findOne({ _id: req.params.id, userId: req.user.id, documentType: DOCTYPE }).lean();
     if (!doc) return next(httpError(404, 'Delivery challan not found'));
     res.json(doc);
   } catch (err) {
@@ -65,7 +66,7 @@ export async function getChallan(req, res, next) {
 // POST /api/sales/challans
 export async function createChallan(req, res, next) {
   try {
-    const doc = await Invoice.create({ ...req.body, documentType: DOCTYPE });
+    const doc = await Invoice.create({ ...req.body, userId: req.user.id, documentType: DOCTYPE });
     res.status(201).json(doc);
   } catch (err) {
     if (err.code === 11000) return next(httpError(409, `Challan number "${req.body.number}" already exists`));
@@ -77,7 +78,7 @@ export async function createChallan(req, res, next) {
 export async function updateChallan(req, res, next) {
   try {
     const doc = await Invoice.findOneAndUpdate(
-      { _id: req.params.id, documentType: DOCTYPE },
+      { _id: req.params.id, userId: req.user.id, documentType: DOCTYPE },
       { $set: { ...req.body, documentType: DOCTYPE } },
       { new: true, runValidators: false },
     ).lean();
@@ -91,7 +92,7 @@ export async function updateChallan(req, res, next) {
 // DELETE /api/sales/challans/:id
 export async function deleteChallan(req, res, next) {
   try {
-    const doc = await Invoice.findOneAndDelete({ _id: req.params.id, documentType: DOCTYPE }).lean();
+    const doc = await Invoice.findOneAndDelete({ _id: req.params.id, userId: req.user.id, documentType: DOCTYPE }).lean();
     if (!doc) return next(httpError(404, 'Delivery challan not found'));
     res.json({ message: 'Delivery challan deleted successfully' });
   } catch (err) {

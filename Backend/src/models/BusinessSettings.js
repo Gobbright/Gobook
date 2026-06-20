@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const businessSettingsSchema = new Schema({
+  userId:          { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, unique: true, index: true },
   businessName:    { type: String, default: 'GoBook Enterprises' },
   businessEmail:   { type: String, default: '' },
   phone:           { type: String, default: '' },

@@ -20,11 +20,12 @@ export const logoUpload = multer({
 });
 
 // GET /api/settings
-export async function getSettings(_req, res, next) {
+export async function getSettings(req, res, next) {
   try {
-    let settings = await BusinessSettings.findOne().lean();
+    const userId = req.user.id;
+    let settings = await BusinessSettings.findOne({ userId }).lean();
     if (!settings) {
-      settings = await BusinessSettings.create({});
+      settings = await BusinessSettings.create({ userId });
     }
     res.json(settings);
   } catch (err) {
@@ -35,9 +36,10 @@ export async function getSettings(_req, res, next) {
 // PUT /api/settings
 export async function updateSettings(req, res, next) {
   try {
-    let settings = await BusinessSettings.findOne();
+    const userId = req.user.id;
+    let settings = await BusinessSettings.findOne({ userId });
     if (!settings) {
-      settings = await BusinessSettings.create(req.body);
+      settings = await BusinessSettings.create({ userId, ...req.body });
     } else {
       Object.assign(settings, req.body);
       await settings.save();
@@ -52,9 +54,9 @@ export async function updateSettings(req, res, next) {
 export async function uploadLogo(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    let settings = await BusinessSettings.findOne();
-    if (!settings) settings = await BusinessSettings.create({});
-    // Delete old logo file if exists
+    const userId = req.user.id;
+    let settings = await BusinessSettings.findOne({ userId });
+    if (!settings) settings = await BusinessSettings.create({ userId });
     if (settings.logoUrl) {
       const oldPath = path.join(__dirname, '../../../../', settings.logoUrl.replace(/^\//, ''));
       fs.unlink(oldPath, () => {});
@@ -71,7 +73,8 @@ export async function uploadLogo(req, res, next) {
 // DELETE /api/settings/logo
 export async function removeLogo(req, res, next) {
   try {
-    const settings = await BusinessSettings.findOne();
+    const userId = req.user.id;
+    const settings = await BusinessSettings.findOne({ userId });
     if (settings?.logoUrl) {
       const filePath = path.join(__dirname, '../../../../', settings.logoUrl.replace(/^\//, ''));
       fs.unlink(filePath, () => {});

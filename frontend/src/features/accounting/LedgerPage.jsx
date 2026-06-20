@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   createLedgerAccount,
   deleteLedgerAccount,
   getLedgerAccounts,
+  importLedgerAccounts,
   updateLedgerAccount,
 } from '../../services/accountingService.js';
 import { formatCurrency } from '../../utils/formatCurrency.js';
@@ -14,10 +15,24 @@ const EMPTY_ACCOUNT = { name: '', group: 'Bank Accounts', opening: 0, debit: 0, 
 const TH = 'text-left text-xs font-semibold uppercase tracking-wide text-[#536173] px-5 py-3 border-b border-[#edf2f7]';
 const TD = 'px-5 py-3.5 border-b border-[#f3f4f6] text-[13px]';
 
+const PAGE_SIZE = 5;
+
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+  if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+  return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
 export function LedgerPage() {
   const [search, setSearch] = useState('');
   const [group, setGroup] = useState('All Groups');
   const [ledgerData, setLedgerData] = useState([]);
+  const [page, setPage] = useState(1);
+  const [formError, setFormError] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_ACCOUNT);
@@ -50,6 +65,11 @@ export function LedgerPage() {
     return true;
   });
 
+  useEffect(() => { setPage(1); }, [search, group]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const stats = {
     total: ledgerData.length,
     totalDebit: ledgerData.reduce((a, r) => a + r.debit, 0),
@@ -63,20 +83,42 @@ export function LedgerPage() {
     setForm(EMPTY_ACCOUNT);
     setEditingId(null);
     setShowForm(false);
+    setFormError('');
   }
   async function handleSubmit(event) {
     event.preventDefault();
+    setFormError('');
     const payload = {
       ...form,
       opening: Number(form.opening),
       debit: Number(form.debit),
       credit: Number(form.credit),
     };
-
-    if (editingId) await updateLedgerAccount(editingId, payload);
-    else await createLedgerAccount(payload);
-    await loadLedgerAccounts();
-    resetForm();
+    try {
+      if (editingId) await updateLedgerAccount(editingId, payload);
+      else await createLedgerAccount(payload);
+      await loadLedgerAccounts();
+      resetForm();
+    } catch (err) {
+      setFormError(err.message);
+    }
+  }
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    try {
+      const result = await importLedgerAccounts(formData);
+      await loadLedgerAccounts();
+      setImportResult(result);
+    } catch (err) {
+      setImportResult({ error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
   }
   function handleEdit(row) {
     setForm({
@@ -108,10 +150,17 @@ export function LedgerPage() {
           <h1 className="m-0 text-[22px] font-bold">Ledger</h1>
           <p className="m-0 text-[13px] text-[#536173] mt-0.5">View all ledger accounts and their balances</p>
         </div>
-        <button className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button" onClick={() => setShowForm(true)}>
-          <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19" /><line x1="5" x2="19" y1="12" y2="12" /></svg>
-          New Ledger
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
+          <button type="button" disabled={importing} onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[#374151] bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit] disabled:opacity-60">
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            {importing ? 'Importing...' : 'Import Excel'}
+          </button>
+          <button className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="button" onClick={() => setShowForm(true)}>
+            <svg fill="none" height="14" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19" /><line x1="5" x2="19" y1="12" y2="12" /></svg>
+            New Ledger
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -120,20 +169,44 @@ export function LedgerPage() {
             <h3 className="m-0 text-[15px] font-semibold">{editingId ? 'Edit Ledger' : 'New Ledger'}</h3>
             <button className="text-[#536173] hover:text-[#111827] bg-transparent border-0 cursor-pointer text-xl font-[inherit]" type="button" onClick={resetForm}>×</button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-            <input className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit] sm:col-span-2" placeholder="Account name" required value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
-            <select className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] bg-white font-[inherit] outline-none" value={form.group} onChange={(e) => updateForm('group', e.target.value)}>
-              {GROUPS.filter((item) => item !== 'All Groups').map((item) => <option key={item}>{item}</option>)}
-            </select>
-            <input className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="Opening" type="number" value={form.opening} onChange={(e) => updateForm('opening', e.target.value)} />
-            <input className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="Debit" type="number" value={form.debit} onChange={(e) => updateForm('debit', e.target.value)} />
-            <input className="border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="Credit" type="number" value={form.credit} onChange={(e) => updateForm('credit', e.target.value)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <label className="block text-[12px] font-medium text-[#374151] mb-1">Account Name <span className="text-red-500">*</span></label>
+              <input className="w-full border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-500 font-[inherit]" placeholder="e.g. HDFC Bank Account" required value={form.name} onChange={(e) => updateForm('name', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium text-[#374151] mb-1">Account Group <span className="text-red-500">*</span></label>
+              <select className="w-full border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] bg-white font-[inherit] outline-none" value={form.group} onChange={(e) => updateForm('group', e.target.value)}>
+                {GROUPS.filter((item) => item !== 'All Groups').map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium text-[#374151] mb-1">Opening Balance (₹)</label>
+              <input className="w-full border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="0.00" type="number" value={form.opening} onChange={(e) => updateForm('opening', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium text-[#374151] mb-1">Debit (₹)</label>
+              <input className="w-full border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="0.00" type="number" value={form.debit} onChange={(e) => updateForm('debit', e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[12px] font-medium text-[#374151] mb-1">Credit (₹)</label>
+              <input className="w-full border border-[#dbe4ef] rounded-md px-3 py-2 text-[13px] text-right outline-none focus:border-blue-500 font-[inherit]" min="0" placeholder="0.00" type="number" value={form.credit} onChange={(e) => updateForm('credit', e.target.value)} />
+            </div>
           </div>
+          {formError && <p className="text-[13px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mt-3">{formError}</p>}
           <div className="flex justify-end gap-2 mt-4">
             <button className="px-4 py-2 text-[13px] font-medium text-gray-700 bg-white border border-[#dbe4ef] rounded-md cursor-pointer hover:bg-gray-50 font-[inherit]" type="button" onClick={resetForm}>Cancel</button>
             <button className="px-4 py-2 text-[13px] font-medium text-white bg-blue-600 rounded-md cursor-pointer hover:bg-blue-700 border-0 font-[inherit]" type="submit">{editingId ? 'Update Ledger' : 'Save Ledger'}</button>
           </div>
         </form>
+      )}
+
+      {importResult && (
+        <div className={`mt-4 mb-0 px-4 py-3 rounded-lg text-[13px] border ${importResult.error ? 'bg-red-50 border-red-100 text-red-700' : 'bg-green-50 border-green-100 text-green-700'}`}>
+          {importResult.error ? importResult.error : `Import complete: ${importResult.imported ?? 0} added, ${importResult.updated ?? 0} updated${(importResult.skipped ?? 0) > 0 ? `, ${importResult.skipped} skipped` : ''}.`}
+          {importResult.errors?.length > 0 && <ul className="mt-1 list-disc pl-5 text-[12px]">{importResult.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}{importResult.errors.length > 5 && <li>...and {importResult.errors.length - 5} more</li>}</ul>}
+          <button type="button" onClick={() => setImportResult(null)} className="mt-1 text-[12px] underline bg-transparent border-0 cursor-pointer p-0 text-inherit font-[inherit]">Dismiss</button>
+        </div>
       )}
 
       {/* ── Stats ── */}
@@ -188,7 +261,7 @@ export function LedgerPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row) => {
+              {paginated.map((row) => {
                 const cl = getClosing(row);
                 const isCr = cl < 0;
                 return (
@@ -224,12 +297,16 @@ export function LedgerPage() {
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-[#edf2f7] flex flex-wrap justify-between gap-2 text-[13px] text-[#536173]">
-          <span>Showing {filtered.length} of {ledgerData.length} accounts</span>
+        <div className="px-5 py-3 border-t border-[#edf2f7] flex items-center justify-between text-[13px] text-[#536173]">
+          <span>Showing {paginated.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
           <div className="flex items-center gap-1">
-            <button className="px-2.5 py-1 rounded border border-[#dbe4ef] hover:bg-gray-50 text-[12px] bg-white font-[inherit] cursor-pointer" type="button">←</button>
-            <span className="px-2.5 py-1 rounded bg-blue-600 text-white text-[12px]">1</span>
-            <button className="px-2.5 py-1 rounded border border-[#dbe4ef] hover:bg-gray-50 text-[12px] bg-white font-[inherit] cursor-pointer" type="button">→</button>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">←</button>
+            {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+              <span key={`ellipsis-${i}`} className="px-2 py-1 text-[12px] text-[#536173]">…</span>
+            ) : (
+              <button key={p} onClick={() => setPage(p)} className={`px-2 py-1 text-[12px] border rounded font-[inherit] cursor-pointer ${p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-[#dbe4ef] hover:bg-gray-50 bg-white'}`}>{p}</button>
+            ))}
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 text-[12px] border border-[#dbe4ef] rounded hover:bg-gray-50 disabled:opacity-40 bg-white font-[inherit] cursor-pointer">→</button>
           </div>
         </div>
       </div>

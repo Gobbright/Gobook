@@ -18,7 +18,7 @@ export const documentConfigs = {
     partyNameLabel: 'Customer / Company Name *',
     partyToLabel: 'Quote To',
     prefix: 'QTN',
-    showGst: false,
+    showGst: true,
     showPayment: false,
     showValidTill: true,
     title: 'Quotation',

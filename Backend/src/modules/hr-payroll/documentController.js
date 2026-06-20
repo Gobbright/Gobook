@@ -36,8 +36,10 @@ function todayLabel() {
 // GET /api/hr-payroll/documents/folder-counts
 export async function getFolderCounts(req, res, next) {
   try {
-    const total  = await HRDocument.countDocuments();
+    const userId = req.user.id;
+    const total  = await HRDocument.countDocuments({ userId });
     const counts = await HRDocument.aggregate([
+      { $match: { userId } },
       { $group: { _id: '$category', count: { $sum: 1 } } },
     ]);
     const map = Object.fromEntries(counts.map((c) => [c._id, c.count]));
@@ -58,7 +60,7 @@ export async function getFolderCounts(req, res, next) {
 export async function listDocuments(req, res, next) {
   try {
     const { search, category, empId, page = 1, limit = 20 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (search)   filter.$or = [{ name: new RegExp(search, 'i') }, { employee: new RegExp(search, 'i') }];
     if (category && category !== 'Employee Documents') filter.category = category;
     if (empId)    filter.empId = empId;
@@ -82,6 +84,7 @@ export async function createDocument(req, res, next) {
     if (!file) return next(httpError(400, 'File is required'));
 
     const doc = await HRDocument.create({
+      userId: req.user.id,
       name:       file.originalname,
       employee,
       empId,
@@ -102,8 +105,8 @@ export async function createDocument(req, res, next) {
 export async function updateDocument(req, res, next) {
   try {
     const { name, employee, empId, category, uploadedBy } = req.body;
-    const doc = await HRDocument.findByIdAndUpdate(
-      req.params.id,
+    const doc = await HRDocument.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: { name, employee, empId, category, uploadedBy } },
       { new: true, runValidators: true },
     ).lean();
@@ -117,7 +120,7 @@ export async function updateDocument(req, res, next) {
 // DELETE /api/hr-payroll/documents/:id
 export async function deleteDocument(req, res, next) {
   try {
-    const doc = await HRDocument.findByIdAndDelete(req.params.id).lean();
+    const doc = await HRDocument.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!doc) return next(httpError(404, 'Document not found'));
     if (doc.filePath) {
       const full = path.join(UPLOAD_DIR, doc.filePath);
@@ -132,7 +135,7 @@ export async function deleteDocument(req, res, next) {
 // GET /api/hr-payroll/documents/:id/download
 export async function downloadDocument(req, res, next) {
   try {
-    const doc = await HRDocument.findById(req.params.id).lean();
+    const doc = await HRDocument.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!doc) return next(httpError(404, 'Document not found'));
     const full = path.join(UPLOAD_DIR, doc.filePath);
     if (!fs.existsSync(full)) return next(httpError(404, 'File not found on server'));
@@ -145,7 +148,7 @@ export async function downloadDocument(req, res, next) {
 // GET /api/hr-payroll/documents/:id/view
 export async function viewDocument(req, res, next) {
   try {
-    const doc = await HRDocument.findById(req.params.id).lean();
+    const doc = await HRDocument.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!doc) return next(httpError(404, 'Document not found'));
     const full = path.join(UPLOAD_DIR, doc.filePath);
     if (!fs.existsSync(full)) return next(httpError(404, 'File not found on server'));

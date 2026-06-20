@@ -3,9 +3,51 @@ import { CashBookEntry } from '../../models/CashBookEntry.js';
 import { JournalEntry } from '../../models/JournalEntry.js';
 import { LedgerAccount } from '../../models/LedgerAccount.js';
 import { httpError } from '../../utils/httpError.js';
+import { asNumber, asText, enumValue, importSummary, parseExcelRows } from '../../utils/excelImport.js';
 
-const sumBy = (rows, key) => rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
 const closingOf = (account) => Number(account.opening ?? 0) + Number(account.debit ?? 0) - Number(account.credit ?? 0);
+
+const LEDGER_IMPORT_COLUMNS = {
+  name: 'name',
+  account: 'name',
+  'account name': 'name',
+  ledger: 'name',
+  'ledger name': 'name',
+  group: 'group',
+  'account group': 'group',
+  'ledger group': 'group',
+  opening: 'opening',
+  'opening balance': 'opening',
+  balance: 'opening',
+  ob: 'opening',
+  debit: 'debit',
+  dr: 'debit',
+  credit: 'credit',
+  cr: 'credit',
+  color: 'color',
+};
+
+const JOURNAL_IMPORT_COLUMNS = {
+  date: 'date',
+  'entry no': 'entryNo',
+  entryno: 'entryNo',
+  'journal no': 'entryNo',
+  'voucher no': 'entryNo',
+  'voucher number': 'entryNo',
+  'vch no': 'entryNo',
+  voucher: 'entryNo',
+  particulars: 'particulars',
+  narration: 'particulars',
+  description: 'particulars',
+  details: 'particulars',
+  note: 'particulars',
+  notes: 'particulars',
+  debit: 'debit',
+  dr: 'debit',
+  credit: 'credit',
+  cr: 'credit',
+  status: 'status',
+};
 
 function normalizeAmountFields(body, fields) {
   return fields.reduce((payload, field) => {
@@ -17,7 +59,7 @@ function normalizeAmountFields(body, fields) {
 export async function listLedgerAccounts(req, res, next) {
   try {
     const { search, group } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     if (search) filter.name = new RegExp(search, 'i');
     if (group && group !== 'All Groups') filter.group = group;
 
@@ -30,10 +72,59 @@ export async function listLedgerAccounts(req, res, next) {
 
 export async function createLedgerAccount(req, res, next) {
   try {
+    const { name } = req.body ?? {};
+    const userId = req.user.id;
+    if (name) {
+      const existing = await LedgerAccount.findOne({ userId, name });
+      if (existing) return next(httpError(409, `Ledger account "${name}" already exists`));
+    }
     const payload = normalizeAmountFields(req.body ?? {}, ['opening', 'debit', 'credit']);
-    const account = await LedgerAccount.create(payload);
+    const account = await LedgerAccount.create({ ...payload, userId });
     res.status(201).json({ account });
   } catch (err) {
+    if (err.code === 11000) return next(httpError(409, 'Ledger account name already exists'));
+    next(err);
+  }
+}
+
+export async function importLedgerAccounts(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const rows = await parseExcelRows(req.file, LEDGER_IMPORT_COLUMNS, 'Account Name, Group, Opening, Debit, Credit');
+    const summary = importSummary();
+
+    for (const { rowNumber, record } of rows) {
+      const name = asText(record.name);
+      const group = asText(record.group);
+      if (!name || !group) {
+        summary.skipped++;
+        summary.errors.push(`Row ${rowNumber}: account name and group are required`);
+        continue;
+      }
+
+      const data = {
+        userId,
+        name,
+        group,
+        opening: asNumber(record.opening, 0),
+        debit: asNumber(record.debit, 0),
+        credit: asNumber(record.credit, 0),
+        color: asText(record.color) || '#2563eb',
+      };
+
+      const existing = await LedgerAccount.findOne({ userId, name });
+      if (existing) {
+        await LedgerAccount.findByIdAndUpdate(existing._id, { $set: data }, { runValidators: true });
+        summary.updated++;
+      } else {
+        await LedgerAccount.create(data);
+        summary.imported++;
+      }
+    }
+
+    res.json(summary);
+  } catch (err) {
+    if (err.code === 11000) return next(httpError(409, 'Duplicate ledger account name found in import'));
     next(err);
   }
 }
@@ -41,10 +132,11 @@ export async function createLedgerAccount(req, res, next) {
 export async function updateLedgerAccount(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['opening', 'debit', 'credit']);
-    const account = await LedgerAccount.findByIdAndUpdate(req.params.id, { $set: payload }, {
-      new: true,
-      runValidators: true,
-    }).lean();
+    const account = await LedgerAccount.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: payload },
+      { new: true, runValidators: true },
+    ).lean();
     if (!account) return next(httpError(404, 'Ledger account not found'));
     res.json({ account });
   } catch (err) {
@@ -54,7 +146,7 @@ export async function updateLedgerAccount(req, res, next) {
 
 export async function deleteLedgerAccount(req, res, next) {
   try {
-    const account = await LedgerAccount.findByIdAndDelete(req.params.id).lean();
+    const account = await LedgerAccount.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!account) return next(httpError(404, 'Ledger account not found'));
     res.json({ message: 'Ledger account deleted' });
   } catch (err) {
@@ -65,7 +157,8 @@ export async function deleteLedgerAccount(req, res, next) {
 export async function listJournalEntries(req, res, next) {
   try {
     const { status } = req.query;
-    const filter = status && status !== 'All' ? { status } : {};
+    const filter = { userId: req.user.id };
+    if (status && status !== 'All') filter.status = status;
     const entries = await JournalEntry.find(filter).sort({ date: -1, createdAt: -1 }).lean();
     res.json({ entries });
   } catch (err) {
@@ -75,10 +168,68 @@ export async function listJournalEntries(req, res, next) {
 
 export async function createJournalEntry(req, res, next) {
   try {
+    const { entryNo } = req.body ?? {};
+    const userId = req.user.id;
+    if (entryNo) {
+      const existing = await JournalEntry.findOne({ userId, entryNo });
+      if (existing) return next(httpError(409, `Journal entry "${entryNo}" already exists`));
+    }
     const payload = normalizeAmountFields(req.body ?? {}, ['debit', 'credit']);
-    const entry = await JournalEntry.create(payload);
+    const entry = await JournalEntry.create({ ...payload, userId });
     res.status(201).json({ entry });
   } catch (err) {
+    if (err.code === 11000) return next(httpError(409, 'Journal entry number already exists'));
+    next(err);
+  }
+}
+
+export async function importJournalEntries(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const rows = await parseExcelRows(req.file, JOURNAL_IMPORT_COLUMNS, 'Date, Entry No, Particulars, Debit, Credit');
+    const summary = importSummary();
+
+    for (const { rowNumber, record } of rows) {
+      const date = asText(record.date);
+      const entryNo = asText(record.entryNo);
+      const particulars = asText(record.particulars);
+      const debit = asNumber(record.debit, Number.NaN);
+      const credit = asNumber(record.credit, Number.NaN);
+
+      if (!date || !entryNo || !particulars || !Number.isFinite(debit) || !Number.isFinite(credit)) {
+        summary.skipped++;
+        summary.errors.push(`Row ${rowNumber}: date, entry no, particulars, debit, and credit are required`);
+        continue;
+      }
+      if (debit < 0 || credit < 0 || (debit === 0 && credit === 0)) {
+        summary.skipped++;
+        summary.errors.push(`Row ${rowNumber}: debit/credit must be non-negative and at least one amount is required`);
+        continue;
+      }
+
+      const data = {
+        userId,
+        date,
+        entryNo,
+        particulars,
+        debit,
+        credit,
+        status: enumValue(record.status, ['Draft', 'Posted'], 'Posted'),
+      };
+
+      const existing = await JournalEntry.findOne({ userId, entryNo });
+      if (existing) {
+        await JournalEntry.findByIdAndUpdate(existing._id, { $set: data }, { runValidators: true });
+        summary.updated++;
+      } else {
+        await JournalEntry.create(data);
+        summary.imported++;
+      }
+    }
+
+    res.json(summary);
+  } catch (err) {
+    if (err.code === 11000) return next(httpError(409, 'Duplicate journal entry number found in import'));
     next(err);
   }
 }
@@ -86,10 +237,11 @@ export async function createJournalEntry(req, res, next) {
 export async function updateJournalEntry(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['debit', 'credit']);
-    const entry = await JournalEntry.findByIdAndUpdate(req.params.id, { $set: payload }, {
-      new: true,
-      runValidators: true,
-    }).lean();
+    const entry = await JournalEntry.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: payload },
+      { new: true, runValidators: true },
+    ).lean();
     if (!entry) return next(httpError(404, 'Journal entry not found'));
     res.json({ entry });
   } catch (err) {
@@ -99,7 +251,7 @@ export async function updateJournalEntry(req, res, next) {
 
 export async function deleteJournalEntry(req, res, next) {
   try {
-    const entry = await JournalEntry.findByIdAndDelete(req.params.id).lean();
+    const entry = await JournalEntry.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!entry) return next(httpError(404, 'Journal entry not found'));
     res.json({ message: 'Journal entry deleted' });
   } catch (err) {
@@ -109,7 +261,7 @@ export async function deleteJournalEntry(req, res, next) {
 
 export async function getTrialBalance(req, res, next) {
   try {
-    const accounts = await LedgerAccount.find().sort({ group: 1, name: 1 }).lean();
+    const accounts = await LedgerAccount.find({ userId: req.user.id }).sort({ group: 1, name: 1 }).lean();
     res.json({
       accounts: accounts.map((account) => {
         const closing = closingOf(account);
@@ -129,7 +281,7 @@ export async function getTrialBalance(req, res, next) {
 
 export async function getPnlStatement(req, res, next) {
   try {
-    const accounts = await LedgerAccount.find().sort({ name: 1 }).lean();
+    const accounts = await LedgerAccount.find({ userId: req.user.id }).sort({ name: 1 }).lean();
     const income = accounts
       .filter((account) => /income|sales/i.test(account.group))
       .map((account) => ({ label: account.name, amount: Math.abs(closingOf(account)) }));
@@ -145,7 +297,7 @@ export async function getPnlStatement(req, res, next) {
 
 export async function getBalanceSheet(req, res, next) {
   try {
-    const accounts = await LedgerAccount.find().sort({ name: 1 }).lean();
+    const accounts = await LedgerAccount.find({ userId: req.user.id }).sort({ name: 1 }).lean();
     const assets = accounts
       .filter((account) => /asset|cash|bank|debtor|stock/i.test(account.group))
       .map((account) => ({ label: account.name, amount: Math.abs(closingOf(account)) }));
@@ -161,7 +313,7 @@ export async function getBalanceSheet(req, res, next) {
 
 export async function listCashBookEntries(req, res, next) {
   try {
-    const entries = await CashBookEntry.find().sort({ date: 1, createdAt: 1 }).lean();
+    const entries = await CashBookEntry.find({ userId: req.user.id }).sort({ date: 1, createdAt: 1 }).lean();
     res.json({ entries });
   } catch (err) {
     next(err);
@@ -171,7 +323,7 @@ export async function listCashBookEntries(req, res, next) {
 export async function createCashBookEntry(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['receipt', 'payment', 'balance']);
-    const entry = await CashBookEntry.create(payload);
+    const entry = await CashBookEntry.create({ ...payload, userId: req.user.id });
     res.status(201).json({ entry });
   } catch (err) {
     next(err);
@@ -181,10 +333,11 @@ export async function createCashBookEntry(req, res, next) {
 export async function updateCashBookEntry(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['receipt', 'payment', 'balance']);
-    const entry = await CashBookEntry.findByIdAndUpdate(req.params.id, { $set: payload }, {
-      new: true,
-      runValidators: true,
-    }).lean();
+    const entry = await CashBookEntry.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: payload },
+      { new: true, runValidators: true },
+    ).lean();
     if (!entry) return next(httpError(404, 'Cash book entry not found'));
     res.json({ entry });
   } catch (err) {
@@ -194,7 +347,7 @@ export async function updateCashBookEntry(req, res, next) {
 
 export async function deleteCashBookEntry(req, res, next) {
   try {
-    const entry = await CashBookEntry.findByIdAndDelete(req.params.id).lean();
+    const entry = await CashBookEntry.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!entry) return next(httpError(404, 'Cash book entry not found'));
     res.json({ message: 'Cash book entry deleted' });
   } catch (err) {
@@ -204,9 +357,10 @@ export async function deleteCashBookEntry(req, res, next) {
 
 export async function listBankBookEntries(req, res, next) {
   try {
-    const banks = await BankBookEntry.distinct('bank');
+    const userId = req.user.id;
+    const banks = await BankBookEntry.distinct('bank', { userId });
     const bank = req.query.bank || banks[0] || '';
-    const filter = bank ? { bank } : {};
+    const filter = { userId, ...(bank ? { bank } : {}) };
     const entries = await BankBookEntry.find(filter).sort({ date: 1, createdAt: 1 }).lean();
     const first = entries[0] ?? {};
 
@@ -226,7 +380,7 @@ export async function listBankBookEntries(req, res, next) {
 export async function createBankBookEntry(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['deposit', 'withdrawal', 'balance']);
-    const entry = await BankBookEntry.create(payload);
+    const entry = await BankBookEntry.create({ ...payload, userId: req.user.id });
     res.status(201).json({ entry });
   } catch (err) {
     next(err);
@@ -236,10 +390,11 @@ export async function createBankBookEntry(req, res, next) {
 export async function updateBankBookEntry(req, res, next) {
   try {
     const payload = normalizeAmountFields(req.body ?? {}, ['deposit', 'withdrawal', 'balance']);
-    const entry = await BankBookEntry.findByIdAndUpdate(req.params.id, { $set: payload }, {
-      new: true,
-      runValidators: true,
-    }).lean();
+    const entry = await BankBookEntry.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: payload },
+      { new: true, runValidators: true },
+    ).lean();
     if (!entry) return next(httpError(404, 'Bank book entry not found'));
     res.json({ entry });
   } catch (err) {
@@ -249,7 +404,7 @@ export async function updateBankBookEntry(req, res, next) {
 
 export async function deleteBankBookEntry(req, res, next) {
   try {
-    const entry = await BankBookEntry.findByIdAndDelete(req.params.id).lean();
+    const entry = await BankBookEntry.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!entry) return next(httpError(404, 'Bank book entry not found'));
     res.json({ message: 'Bank book entry deleted' });
   } catch (err) {

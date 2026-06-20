@@ -11,7 +11,7 @@ const LABEL = 'block text-[12px] font-medium text-[#374151] mb-1';
 const GST_RATES = [0, 5, 12, 18, 28];
 const UNITS = ['Nos', 'Pcs', 'Kg', 'Box', 'Ltr', 'Mtr', 'Set'];
 
-const EMPTY_FORM = { description: '', code: '', category: '', unit: 'Nos', rate: '', gstRate: 18, stock: 0, minStockLevel: 0, barcode: '', status: 'Active' };
+const EMPTY_FORM = { description: '', code: '', hsn: '', category: '', unit: 'Nos', rate: '', gstRate: 18, stock: 0, minStockLevel: 0, barcode: '', status: 'Active' };
 
 function genBarcode() {
   return Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join('');
@@ -86,6 +86,10 @@ function ProductModal({ mode, initial, nextCode, categories, onSave, onClose }) 
             <div>
               <label className={LABEL}>Product ID *</label>
               <input className={INPUT} value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="e.g. 1001" />
+            </div>
+            <div>
+              <label className={LABEL}>HSN / SAC</label>
+              <input className={INPUT} value={form.hsn || ''} onChange={(e) => set('hsn', e.target.value)} placeholder="e.g. 8471" />
             </div>
             <div>
               <label className={LABEL}>Category</label>
@@ -347,6 +351,7 @@ export function ProductsPage() {
               <tr>
                 <th className={TH}>Product Name</th>
                 <th className={TH}>SKU / Code</th>
+                <th className={TH}>HSN / SAC</th>
                 <th className={TH}>Category</th>
                 <th className={TH}>Sale Price</th>
                 <th className={TH}>GST</th>
@@ -357,13 +362,14 @@ export function ProductsPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-5 py-8 text-center text-[13px] text-[#536173]">Loading...</td></tr>
+                <tr><td colSpan={9} className="px-5 py-8 text-center text-[13px] text-[#536173]">Loading...</td></tr>
               ) : products.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-8 text-center text-[13px] text-[#536173]">No products found</td></tr>
+                <tr><td colSpan={9} className="px-5 py-8 text-center text-[13px] text-[#536173]">No products found</td></tr>
               ) : products.map((row) => (
                 <tr key={row._id} className="hover:bg-gray-50">
                   <td className={`${TD} font-medium text-[#111827]`}>{row.description}</td>
                   <td className={`${TD} text-[#536173]`}>{row.code}</td>
+                  <td className={`${TD} text-[#536173] font-mono`}>{row.hsn || '-'}</td>
                   <td className={`${TD} text-[#536173]`}>{row.category || '—'}</td>
                   <td className={`${TD} font-medium text-[#111827]`}>{formatCurrency(row.rate)}</td>
                   <td className={`${TD} text-[#536173]`}>{Number(row.gstRate ?? 0)}%</td>

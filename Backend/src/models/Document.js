@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const documentSchema = new Schema({
+  userId:     { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:       { type: String, required: true, trim: true },
   employee:   { type: String, default: '', trim: true },
   empId:      { type: String, default: '', trim: true },

@@ -22,7 +22,8 @@ const customFieldSchema = new Schema({
 });
 
 const invoiceSchema = new Schema({
-  number:       { type: String, required: true, unique: true, trim: true },
+  userId:       { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
+  number:       { type: String, required: true, trim: true },
   documentType: { type: String, default: 'invoice' },
 
   customer: {
@@ -90,7 +91,8 @@ const invoiceSchema = new Schema({
   totals:  { type: Schema.Types.Mixed, default: {} },
 }, { timestamps: true });
 
-invoiceSchema.index({ documentType: 1, createdAt: -1 });
-invoiceSchema.index({ 'customer.name': 1 });
+invoiceSchema.index({ userId: 1, number: 1 }, { unique: true });
+invoiceSchema.index({ userId: 1, documentType: 1, createdAt: -1 });
+invoiceSchema.index({ userId: 1, 'customer.name': 1 });
 
 export const Invoice = model('Invoice', invoiceSchema);

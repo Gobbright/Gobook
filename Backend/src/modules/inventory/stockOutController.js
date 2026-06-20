@@ -11,7 +11,8 @@ function monthRange() {
 // GET /api/inventory/stock-out/next-number
 export async function getNextStockOutNumber(req, res, next) {
   try {
-    const last = await StockOut.findOne({}, { stockOutNo: 1 }, { sort: { createdAt: -1 } });
+    const userId = req.user.id;
+    const last = await StockOut.findOne({ userId }, { stockOutNo: 1 }, { sort: { createdAt: -1 } });
     let seq = 1;
     if (last) {
       const parts = last.stockOutNo.split('-');
@@ -28,10 +29,11 @@ export async function getNextStockOutNumber(req, res, next) {
 // GET /api/inventory/stock-out/stats
 export async function getStockOutStats(req, res, next) {
   try {
+    const userId = req.user.id;
     const range = monthRange();
     const [result, pending] = await Promise.all([
       StockOut.aggregate([
-        { $match: { date: range } },
+        { $match: { userId, date: range } },
         {
           $group: {
             _id: null,
@@ -41,7 +43,7 @@ export async function getStockOutStats(req, res, next) {
           },
         },
       ]),
-      StockOut.countDocuments({ status: 'Pending' }),
+      StockOut.countDocuments({ userId, status: 'Pending' }),
     ]);
     const r = result[0] ?? { count: 0, totalItems: 0, totalValue: 0 };
     res.json({
@@ -66,7 +68,7 @@ function applyDateRange(filter, dateFrom, dateTo) {
 export async function listStockOut(req, res, next) {
   try {
     const { search, dateFrom, dateTo, page = 1, limit = 50 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
     applyDateRange(filter, dateFrom, dateTo);
     if (search) {
       filter.$or = [
@@ -88,7 +90,7 @@ export async function listStockOut(req, res, next) {
 // GET /api/inventory/stock-out/:id
 export async function getStockOut(req, res, next) {
   try {
-    const entry = await StockOut.findById(req.params.id).lean();
+    const entry = await StockOut.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!entry) return next(httpError(404, 'Stock-out record not found'));
     res.json(entry);
   } catch (err) {
@@ -99,7 +101,7 @@ export async function getStockOut(req, res, next) {
 // POST /api/inventory/stock-out
 export async function createStockOut(req, res, next) {
   try {
-    const entry = await StockOut.create(req.body);
+    const entry = await StockOut.create({ ...req.body, userId: req.user.id });
     res.status(201).json(entry);
   } catch (err) {
     next(err);
@@ -109,8 +111,8 @@ export async function createStockOut(req, res, next) {
 // PUT /api/inventory/stock-out/:id
 export async function updateStockOut(req, res, next) {
   try {
-    const entry = await StockOut.findByIdAndUpdate(
-      req.params.id,
+    const entry = await StockOut.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { $set: req.body },
       { new: true, runValidators: true },
     ).lean();
@@ -124,7 +126,7 @@ export async function updateStockOut(req, res, next) {
 // DELETE /api/inventory/stock-out/:id
 export async function deleteStockOut(req, res, next) {
   try {
-    const entry = await StockOut.findByIdAndDelete(req.params.id).lean();
+    const entry = await StockOut.findOneAndDelete({ _id: req.params.id, userId: req.user.id }).lean();
     if (!entry) return next(httpError(404, 'Stock-out record not found'));
     res.json({ message: 'Stock-out record deleted' });
   } catch (err) {

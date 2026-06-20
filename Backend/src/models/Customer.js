@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 const customerSchema = new Schema({
+  userId:  { type: Schema.Types.ObjectId, ref: 'AppUser', required: true, index: true },
   name:    { type: String, required: true, trim: true },
   gstin:   { type: String, trim: true, uppercase: true, default: '' },
   phone:   { type: String, trim: true, default: '' },
